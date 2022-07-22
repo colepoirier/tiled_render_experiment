@@ -4,3 +4,18 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
+bevy = { git = "https://github.com/bevyengine/bevy", rev = "4b1f6f4ebba92fc968124380d5a19e1d2500e2dd", default-features = false, features = [
+    "x11",
+] }
+crossbeam-channel = "0.5.5"
+futures-lite = "1.12.0"
+vlsir = "1.0.0"
+layout21 = { git = "https://github.com/colepoirier/Layout21" }
+geo = "0.22.1"
+csv = "1.1.6"
+
+[profile.dev.package.layout21]
+opt-level = 3
+
+[profile.dev.package."*"]
+opt-level = 1
