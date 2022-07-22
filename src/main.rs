@@ -17,6 +17,8 @@ use futures_lite::future;
 use geo::Intersects;
 use layout21::raw::{self, proto::ProtoImporter, BoundBox, BoundBoxTrait, Library};
 
+mod downscale;
+
 pub type GeoRect = geo::Rect<i64>;
 pub type GeoPolygon = geo::Polygon<i64>;
 
