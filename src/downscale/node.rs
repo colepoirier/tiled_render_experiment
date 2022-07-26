@@ -13,10 +13,16 @@ use bevy::render::{
     view::{ExtractedView, ViewTarget},
 };
 
-use super::{DownscalingPipeline, DownscalingTarget};
+use super::{DownscalingPipeline, SpecializedDownscalingPipeline};
+
+pub const DOWNSCALING_PASS: &str = "DOWNSCALING_PASS";
 
 pub struct DownscalingNode {
-    query: QueryState<(&'static ViewTarget, &'static DownscalingTarget), With<ExtractedView>>,
+    query: QueryState<(
+        &'static InputTextureView,
+        &'static OutputTextureView,
+        &'static SpecializedDownscalingPipeline,
+    )>,
     cached_texture_bind_group: Mutex<Option<(TextureViewId, BindGroup)>>,
 }
 
@@ -51,16 +57,20 @@ impl Node for DownscalingNode {
         let pipeline_cache = world.get_resource::<PipelineCache>().unwrap();
         let downscaling_pipeline = world.get_resource::<DownscalingPipeline>().unwrap();
 
-        let (target, downscaling_target) = match self.query.get_manual(world, view_entity) {
-            Ok(query) => query,
-            Err(_) => return Ok(()),
-        };
+        let (orig_texview, downscaled_, xviewspecialized_downscaling_pipeline) =
+            match self.query.get_manual(world, view_entity) {
+                Ok(query) => query,
+                Err(_) => return Ok(()),
+            };
 
-        let downscaled_texture = &target.sampled_target.as_ref().unwrap();
+        // // target.view is the camera's "output texture",
+        // // target.sampled_target will be our downscaled texture view
+        // let orig_texview = &view_target.view;
+        // let downscaled_texview = &view_target.sampled_target.as_ref().unwrap();
 
         let mut cached_bind_group = self.cached_texture_bind_group.lock().unwrap();
         let bind_group = match &mut *cached_bind_group {
-            Some((id, bind_group)) if downscaled_texture.id() == *id => bind_group,
+            Some((id, bind_group)) if orig_texview.id() == *id => bind_group,
             cached_bind_group => {
                 let sampler = render_context
                     .render_device
@@ -75,7 +85,7 @@ impl Node for DownscalingNode {
                             entries: &[
                                 BindGroupEntry {
                                     binding: 0,
-                                    resource: BindingResource::TextureView(downscaled_texture),
+                                    resource: BindingResource::TextureView(orig_texview),
                                 },
                                 BindGroupEntry {
                                     binding: 1,
@@ -84,21 +94,21 @@ impl Node for DownscalingNode {
                             ],
                         });
 
-                let (_, bind_group) =
-                    cached_bind_group.insert((downscaled_texture.id(), bind_group));
+                let (_, bind_group) = cached_bind_group.insert((orig_texview.id(), bind_group));
                 bind_group
             }
         };
 
-        let pipeline = match pipeline_cache.get_render_pipeline(downscaling_target.pipeline) {
-            Some(pipeline) => pipeline,
-            None => return Ok(()),
-        };
+        let pipeline =
+            match pipeline_cache.get_render_pipeline(specialized_downscaling_pipeline.pipeline) {
+                Some(pipeline) => pipeline,
+                None => return Ok(()),
+            };
 
         let pass_descriptor = RenderPassDescriptor {
             label: Some("downscaling_pass"),
             color_attachments: &[Some(RenderPassColorAttachment {
-                view: &target.view,
+                view: &downscaled_texview,
                 resolve_target: None,
                 ops: Operations {
                     load: LoadOp::Clear(Default::default()), // TODO dont_care

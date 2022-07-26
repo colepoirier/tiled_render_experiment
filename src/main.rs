@@ -51,6 +51,12 @@ pub struct Tile {
     pub shapes: Vec<usize>,
 }
 
+#[derive(Debug, Clone, Copy, Component)]
+pub struct HiResTileMarker;
+
+#[derive(Debug, Clone, Copy, Component)]
+pub struct DownscaledTileMarker;
+
 impl std::fmt::Debug for Tile {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
         write!(
@@ -968,7 +974,46 @@ fn spawn_system(
                 transform: Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
                 ..default()
             })
-            .insert(second_pass_layer);
+            .insert(second_pass_layer)
+            .insert(HiResTileMarker);
+
+        // downscaled image and sprite
+        let size = Extent3d {
+            width: 64,
+            height: 64,
+            ..default()
+        };
+
+        let mut image = Image {
+            texture_descriptor: TextureDescriptor {
+                label: None,
+                size,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Bgra8UnormSrgb,
+                mip_level_count: 1,
+                sample_count: 1,
+                usage: TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::COPY_DST
+                    | TextureUsages::RENDER_ATTACHMENT,
+            },
+            ..default()
+        };
+        image.resize(size);
+
+        let image_handle = images.add(image);
+
+        commands
+            .spawn_bundle(SpriteBundle {
+                sprite: Sprite {
+                    custom_size: Some(Vec2::new(size.width as f32, size.height as f32)),
+                    ..default()
+                },
+                texture: image_handle,
+                transform: Transform::from_translation(Vec3::new(4096.0, 4096.0, 0.0)),
+                ..default()
+            })
+            .insert(second_pass_layer)
+            .insert(DownscaledTileMarker);
 
         let mut camera = Camera2dBundle {
             transform: Transform::from_translation(Vec3::new(-2048.0, -2048.0, 999.0)),
