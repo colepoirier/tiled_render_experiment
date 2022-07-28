@@ -1,23 +1,27 @@
 use bevy::{
+    input::mouse::{MouseScrollUnit, MouseWheel},
     prelude::*,
+    reflect::TypeUuid,
     render::{
-        camera::{RenderTarget, WindowOrigin},
+        camera::{CameraProjection, RenderTarget, WindowOrigin},
         render_resource::{
-            Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
+            AsBindGroup, Extent3d, ShaderRef, TextureDescriptor, TextureDimension, TextureFormat,
+            TextureUsages,
         },
         renderer::{RenderDevice, RenderQueue},
         view::RenderLayers,
     },
+    sprite::{Material2d, Material2dPlugin, MaterialMesh2dBundle},
     tasks::{AsyncComputeTaskPool, Task},
     utils::hashbrown::HashMap,
 };
+
 use bevy_prototype_lyon::prelude::*;
 use crossbeam_channel::{bounded, Receiver, Sender};
+use csv::Writer;
 use futures_lite::future;
 use geo::Intersects;
 use layout21::raw::{self, proto::ProtoImporter, BoundBox, BoundBoxTrait, Library};
-
-mod downscale;
 
 pub type GeoRect = geo::Rect<i64>;
 pub type GeoPolygon = geo::Polygon<i64>;
@@ -86,6 +90,7 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .add_plugin(ShapePlugin)
         .add_plugin(PanCamPlugin)
+        .add_plugin(Material2dPlugin::<PostProcessingMaterial>::default())
         .init_resource::<LayerColors>()
         .init_resource::<VlsirLib>()
         .init_resource::<FlattenedElems>()
@@ -387,8 +392,6 @@ fn stats(grid: &TileMap) {
     let grid_size = get_grid_shape(&grid.keys().map(|x| *x).collect::<Vec<(u32, u32)>>());
 
     // let mut table = vec![];
-
-    use csv::Writer;
 
     let mut wtr = Writer::from_path("table_heatmap_data.csv").unwrap();
 
@@ -722,6 +725,8 @@ struct DrawTileEvent((u32, u32));
 fn spawn_system(
     mut commands: Commands,
     mut images: ResMut<Assets<Image>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut post_processing_materials: ResMut<Assets<PostProcessingMaterial>>,
     render_queue: Res<RenderQueue>,
     tilemap: Res<TileMap>,
     flattened_elems: Res<FlattenedElems>,
@@ -736,12 +741,6 @@ fn spawn_system(
             height: 4096,
             ..default()
         };
-
-        // let half_size = Extent3d {
-        //     width: 2048,
-        //     height: 2048,
-        //     ..default()
-        // };
 
         // This is the texture that will be rendered to.
         let mut image = Image {
@@ -759,33 +758,12 @@ fn spawn_system(
             ..default()
         };
 
-        // The intermediate, downsized texture that will be rendered to
-        // let mut halfsized_image = Image {
-        //     texture_descriptor: TextureDescriptor {
-        //         label: None,
-        //         size,
-        //         dimension: TextureDimension::D2,
-        //         format: TextureFormat::Bgra8UnormSrgb,
-        //         mip_level_count: 1,
-        //         sample_count: 1,
-        //         usage: TextureUsages::TEXTURE_BINDING
-        //             | TextureUsages::COPY_DST
-        //             | TextureUsages::RENDER_ATTACHMENT,
-        //     },
-        //     ..default()
-        // };
-
         // fill image.data with zeroes
         image.resize(size);
         // halfsized_image.resize(half_size);
 
-        let image_handle = images.add(image);
+        let source_image_handle = images.add(image);
         // let halfsized_image_handle = images.add(halfsized_image);
-
-        // This specifies the layer used for the first pass, which will be attached to
-        // the first pass camera and cube.
-        let first_pass_layer = RenderLayers::layer(0);
-        let second_pass_layer = RenderLayers::layer(1);
 
         let tile = tilemap.get(key).unwrap();
 
@@ -848,76 +826,9 @@ fn spawn_system(
                 commands
                     .spawn_bundle(lyon_shape)
                     .insert_bundle(VisibilityBundle::default())
-                    .insert(LyonShape)
-                    .insert(first_pass_layer);
+                    .insert(LyonShape);
             }
         }
-
-        // let shape = shapes::RegularPolygon {
-        //     sides: 6,
-        //     feature: shapes::RegularPolygonFeature::Radius(200.0),
-        //     ..shapes::RegularPolygon::default()
-        // };
-
-        // let shape = shapes::Polygon {
-        //     points: vec![
-        //         Vec2::new(3090.0, -638525.0),
-        //         Vec2::new(3865.0, -638525.0),
-        //         Vec2::new(3865.0, -639725.0),
-        //         Vec2::new(3090.0, -639725.0),
-        //     ],
-        //     closed: true,
-        // };
-
-        // let shape = shapes::Polygon {
-        //     points: vec![
-        //         Vec2::new(3090.0, -638525.0),
-        //         Vec2::new(3865.0, -638525.0),
-        //         Vec2::new(3865.0, -639725.0),
-        //         Vec2::new(3090.0, -639725.0),
-        //     ],
-        //     closed: true,
-        // };
-
-        // let shape = shapes::Polygon {
-        //     points: vec![
-        //         Vec2::new(90.0, 525.0),
-        //         Vec2::new(65.0, 525.0),
-        //         Vec2::new(65.0, 725.0),
-        //         Vec2::new(90.0, 725.0),
-        //     ],
-        //     closed: true,
-        // };
-
-        // let shape = shapes::Polygon {
-        //     points: vec![
-        //         Vec2::new(0.0, 0.0),
-        //         Vec2::new(4096.0, 0.0),
-        //         Vec2::new(4096.0, 4096.0),
-        //         Vec2::new(0.0, 4096.0),
-        //     ],
-        //     closed: true,
-        // };
-
-        // let transform = Transform::from_translation(Vec3::new(0.0, 0.0, 0.0));
-
-        // let transform = Transform::from_translation(Vec3::new(
-        //     -(size.width as f32),
-        //     -(size.height as f32),
-        //     0.0,
-        // ));
-
-        // commands
-        //     .spawn_bundle(GeometryBuilder::build_as(
-        //         &shape,
-        //         DrawMode::Outlined {
-        //             fill_mode: FillMode::color(Color::CYAN),
-        //             outline_mode: StrokeMode::new(Color::BLACK, 1.0),
-        //         },
-        //         transform,
-        //     ))
-        //     .insert(LyonShape)
-        //     .insert(first_pass_layer);
 
         let x = tile.extents.min().x / 4;
         let y = tile.extents.min().y / 4;
@@ -940,9 +851,7 @@ fn spawn_system(
         let mut camera = Camera2dBundle {
             camera_2d: Camera2d::default(),
             camera: Camera {
-                // render before the "main pass" camera
-                priority: -1,
-                target: RenderTarget::Image(image_handle.clone()),
+                target: RenderTarget::Image(source_image_handle.clone()),
                 ..default()
             },
             transform,
@@ -952,17 +861,68 @@ fn spawn_system(
         camera.projection.window_origin = WindowOrigin::BottomLeft;
 
         info!("{:?}", camera.projection);
-        use bevy::render::camera::CameraProjection;
         camera
             .projection
             .update(size.width as f32, size.height as f32);
 
         info!("{:?}", camera.projection);
 
+        commands.spawn_bundle(camera).insert(TextureCam);
+
+        // let second_pass_layer = RenderLayers::layer(1);
+
+        // let mut camera = Camera2dBundle {
+        //     transform: Transform::from_translation(Vec3::new(-2048.0, -2048.0, 999.0)),
+        //     camera: Camera {
+        //         priority: 1,
+        //         ..default()
+        //     },
+        //     ..default()
+        // };
+
+        // camera.projection.window_origin = WindowOrigin::BottomLeft;
+
+        // // info!("{:?}", camera.projection);
+        // camera
+        //     .projection
+        //     .update(size.width as f32, size.height as f32);
+
+        // camera.projection.scale = 4.0;
+
+        // info!("{:?}", camera.projection);
+
+        // // The main pass camera.
+        // commands
+        //     .spawn_bundle(camera)
+        //     .insert(second_pass_layer)
+        //     .insert(PanCam::default());
+
+        // This specifies the layer used for the post processing camera, which will be attached to the post processing camera and 2d quad.
+        let post_processing_pass_layer = RenderLayers::layer(1);
+        let main_camera_pass_layer = RenderLayers::layer(2);
+
+        let quad_handle = meshes.add(Mesh::from(shape::Quad::new(Vec2::new(
+            size.width as f32,
+            size.height as f32,
+        ))));
+
+        // This material has the texture that has been rendered.
+        let material_handle = post_processing_materials.add(PostProcessingMaterial {
+            source_image: source_image_handle.clone(),
+        });
+
+        // Post processing 2d quad, with material using the render texture done by the main camera, with a custom shader.
         commands
-            .spawn_bundle(camera)
-            .insert(TextureCam)
-            .insert(first_pass_layer);
+            .spawn_bundle(MaterialMesh2dBundle {
+                mesh: quad_handle.into(),
+                material: material_handle,
+                transform: Transform {
+                    translation: Vec3::new(0.0, 0.0, 1.5),
+                    ..default()
+                },
+                ..default()
+            })
+            .insert(post_processing_pass_layer);
 
         commands
             .spawn_bundle(SpriteBundle {
@@ -970,71 +930,24 @@ fn spawn_system(
                     custom_size: Some(Vec2::new(size.width as f32, size.height as f32)),
                     ..default()
                 },
-                texture: image_handle,
+                texture: source_image_handle.clone(),
                 transform: Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
                 ..default()
             })
-            .insert(second_pass_layer)
+            .insert(main_camera_pass_layer)
             .insert(HiResTileMarker);
 
-        // downscaled image and sprite
-        let size = Extent3d {
-            width: 64,
-            height: 64,
-            ..default()
-        };
-
-        let mut image = Image {
-            texture_descriptor: TextureDescriptor {
-                label: None,
-                size,
-                dimension: TextureDimension::D2,
-                format: TextureFormat::Bgra8UnormSrgb,
-                mip_level_count: 1,
-                sample_count: 1,
-                usage: TextureUsages::TEXTURE_BINDING
-                    | TextureUsages::COPY_DST
-                    | TextureUsages::RENDER_ATTACHMENT,
-            },
-            ..default()
-        };
-        image.resize(size);
-
-        let image_handle = images.add(image);
-
+        // The post-processing pass camera.
         commands
-            .spawn_bundle(SpriteBundle {
-                sprite: Sprite {
-                    custom_size: Some(Vec2::new(size.width as f32, size.height as f32)),
+            .spawn_bundle(Camera2dBundle {
+                camera: Camera {
+                    // renders after the first main camera which has default value: 0.
+                    priority: 1,
                     ..default()
                 },
-                texture: image_handle,
-                transform: Transform::from_translation(Vec3::new(4096.0, 4096.0, 0.0)),
-                ..default()
+                ..Camera2dBundle::default()
             })
-            .insert(second_pass_layer)
-            .insert(DownscaledTileMarker);
-
-        let mut camera = Camera2dBundle {
-            transform: Transform::from_translation(Vec3::new(-2048.0, -2048.0, 999.0)),
-            ..default()
-        };
-
-        camera.projection.window_origin = WindowOrigin::BottomLeft;
-
-        // info!("{:?}", camera.projection);
-        camera
-            .projection
-            .update(size.width as f32, size.height as f32);
-
-        camera.projection.scale = 4.0;
-
-        // info!("{:?}", camera.projection);
-
-        // The main pass camera.
-        commands
-            .spawn_bundle(camera)
-            .insert(second_pass_layer)
+            .insert(main_camera_pass_layer)
             .insert(PanCam::default());
 
         let s = rendering_done.sender.clone();
@@ -1065,7 +978,45 @@ fn despawn_system(
     }
 }
 
-use bevy::input::mouse::{MouseScrollUnit, MouseWheel};
+// // Region below declares of the custom material handling post processing effect
+
+// /// Our custom post processing material
+// #[derive(AsBindGroup, TypeUuid, Clone)]
+// #[uuid = "bc2f08eb-a0fb-43f1-a908-54871ea597d5"]
+// struct PostProcessingMaterial {
+//     /// In this example, this image will be the result of the main camera.
+//     #[texture(0)]
+//     #[sampler(1)]
+//     source_image: Handle<Image>,
+// }
+
+// impl Material2d for PostProcessingMaterial {
+//     fn vertex_shader() -> ShaderRef {
+//         "shaders/fullscreen.wgsl".into()
+//     }
+//     fn fragment_shader() -> ShaderRef {
+//         "shaders/downscaling.wgsl".into()
+//     }
+//     // fn fragment_shader() -> ShaderRef {
+//     //     "shaders/unrolled.wgsl".into()
+//     // }
+// }
+
+/// Our custom post processing material
+#[derive(AsBindGroup, TypeUuid, Clone)]
+#[uuid = "bc2f08eb-a0fb-43f1-a908-54871ea597d5"]
+struct PostProcessingMaterial {
+    /// In this example, this image will be the result of the main camera.
+    #[texture(0)]
+    #[sampler(1)]
+    source_image: Handle<Image>,
+}
+
+impl Material2d for PostProcessingMaterial {
+    fn fragment_shader() -> ShaderRef {
+        "shaders/custom_material_chromatic_aberration.wgsl".into()
+    }
+}
 
 #[derive(Default)]
 pub struct PanCamPlugin;

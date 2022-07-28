@@ -4,10 +4,8 @@ version = "0.1.0"
 edition = "2021"
 
 [dependencies]
-bevy = { git = "https://github.com/bevyengine/bevy", rev = "4b1f6f4ebba92fc968124380d5a19e1d2500e2dd", default-features = false, features = [
-    "x11",
-] }
-bevy_prototype_lyon = { git = "https://github.com/colepoirier/bevy_prototype_lyon" }
+bevy = { git = "https://github.com/bevyengine/bevy" }
+bevy_prototype_lyon = { git = "https://github.com/colepoirier/bevy_prototype_lyon", branch = "bevy-main" }
 crossbeam-channel = "0.5.5"
 futures-lite = "1.12.0"
 vlsir = "1.0.0"
