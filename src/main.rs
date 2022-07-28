@@ -4,6 +4,7 @@ use bevy::{
     reflect::TypeUuid,
     render::{
         camera::{CameraProjection, RenderTarget, WindowOrigin},
+        mesh::{Indices, PrimitiveTopology},
         render_resource::{
             AsBindGroup, Extent3d, ShaderRef, TextureDescriptor, TextureDimension, TextureFormat,
             TextureUsages,
@@ -734,7 +735,9 @@ fn spawn_system(
     layers: Res<Layers>,
     mut ev: EventReader<DrawTileEvent>,
     rendering_done: Res<RenderingDone>,
+    asset_server: Res<AssetServer>,
 ) {
+    asset_server.watch_for_changes().unwrap();
     for DrawTileEvent(key) in ev.iter() {
         let size = Extent3d {
             width: 4096,
@@ -901,10 +904,28 @@ fn spawn_system(
         let post_processing_pass_layer = RenderLayers::layer(1);
         let main_camera_pass_layer = RenderLayers::layer(2);
 
-        let quad_handle = meshes.add(Mesh::from(shape::Quad::new(Vec2::new(
-            size.width as f32,
-            size.height as f32,
-        ))));
+        // let quad_handle = meshes.add(Mesh::from(shape::Quad::new(Vec2::new(
+        //     size.width as f32,
+        //     size.height as f32,
+        // ))));
+
+        let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
+        mesh.insert_attribute(
+            Mesh::ATTRIBUTE_POSITION,
+            vec![[-1.0, 1.0, 0.0], [-1.0, -3.0, 0.0], [3.0, 1.0, 0.0]],
+        );
+
+        mesh.insert_attribute(
+            Mesh::ATTRIBUTE_UV_0,
+            vec![[0.0, 0.0], [0.0, 2.0], [2.0, 0.0]],
+        );
+
+        mesh.insert_attribute(
+            Mesh::ATTRIBUTE_NORMAL,
+            vec![[0.0, 0.0, 1.0], [0.0, 0.0, 1.0], [0.0, 0.0, 1.0]],
+        );
+
+        let mesh_handle = meshes.add(mesh);
 
         // This material has the texture that has been rendered.
         let material_handle = post_processing_materials.add(PostProcessingMaterial {
@@ -914,7 +935,7 @@ fn spawn_system(
         // Post processing 2d quad, with material using the render texture done by the main camera, with a custom shader.
         commands
             .spawn_bundle(MaterialMesh2dBundle {
-                mesh: quad_handle.into(),
+                mesh: mesh_handle.into(),
                 material: material_handle,
                 transform: Transform {
                     translation: Vec3::new(0.0, 0.0, 1.5),
@@ -924,18 +945,32 @@ fn spawn_system(
             })
             .insert(post_processing_pass_layer);
 
-        commands
-            .spawn_bundle(SpriteBundle {
-                sprite: Sprite {
-                    custom_size: Some(Vec2::new(size.width as f32, size.height as f32)),
-                    ..default()
-                },
-                texture: source_image_handle.clone(),
-                transform: Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
-                ..default()
-            })
-            .insert(main_camera_pass_layer)
-            .insert(HiResTileMarker);
+        let size = Extent3d {
+            width: 64,
+            height: 64,
+            ..default()
+        };
+
+        // This is the texture that will be rendered to.
+        let mut image = Image {
+            texture_descriptor: TextureDescriptor {
+                label: None,
+                size,
+                dimension: TextureDimension::D2,
+                format: TextureFormat::Bgra8UnormSrgb,
+                mip_level_count: 1,
+                sample_count: 1,
+                usage: TextureUsages::TEXTURE_BINDING
+                    | TextureUsages::COPY_DST
+                    | TextureUsages::RENDER_ATTACHMENT,
+            },
+            ..default()
+        };
+
+        // fill image.data with zeroes
+        image.resize(size);
+
+        let downscaled_image_handle = images.add(image);
 
         // The post-processing pass camera.
         commands
@@ -943,6 +978,31 @@ fn spawn_system(
                 camera: Camera {
                     // renders after the first main camera which has default value: 0.
                     priority: 1,
+                    target: RenderTarget::Image(downscaled_image_handle.clone()),
+                    ..default()
+                },
+                ..Camera2dBundle::default()
+            })
+            .insert(post_processing_pass_layer);
+
+        commands
+            .spawn_bundle(SpriteBundle {
+                sprite: Sprite {
+                    custom_size: Some(Vec2::new(size.width as f32, size.height as f32)),
+                    ..default()
+                },
+                texture: downscaled_image_handle.clone(),
+                transform: Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
+                ..default()
+            })
+            .insert(main_camera_pass_layer);
+
+        // The post-processing pass camera.
+        commands
+            .spawn_bundle(Camera2dBundle {
+                camera: Camera {
+                    // renders after the first main camera which has default value: 0.
+                    priority: 2,
                     ..default()
                 },
                 ..Camera2dBundle::default()
@@ -1013,6 +1073,9 @@ struct PostProcessingMaterial {
 }
 
 impl Material2d for PostProcessingMaterial {
+    fn vertex_shader() -> ShaderRef {
+        "shaders/rob_vertex.wgsl".into()
+    }
     fn fragment_shader() -> ShaderRef {
         "shaders/custom_material_chromatic_aberration.wgsl".into()
     }

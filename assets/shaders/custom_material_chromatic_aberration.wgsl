@@ -1,7 +1,7 @@
 #import bevy_pbr::mesh_view_bindings
 
 @group(1) @binding(0)
-var texture: texture_2d<f32>;
+var our_texture: texture_2d<f32>;
 
 @group(1) @binding(1)
 var our_sampler: sampler;
@@ -22,11 +22,14 @@ fn fragment(
     //     textureSample(texture, our_sampler, uv + vec2<f32>(0.0, offset_strength)).b,
     //     1.0
     // );
-        var output_color = vec4<f32>(
-        1.0,
-        0.0,
-        0.0,
-        1.0
-    );
+    //     var output_color = vec4<f32>(
+    //     1.0,
+    //     0.0,
+    //     0.0,
+    //     1.0
+    // );
+
+    var output_color = textureSample(our_texture, our_sampler, uv);
+
     return output_color;
 }
