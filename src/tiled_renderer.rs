@@ -124,7 +124,7 @@ fn spawn_system(
 
                 let lyon_poly = shapes::Polygon {
                     points: vec![
-                        (xmin as f32, ymin as f32).into(), 
+                        (xmin as f32, ymin as f32).into(),
                         (xmax as f32, ymin as f32).into(),
                         (xmax as f32, ymax as f32).into(),
                         (xmin as f32, ymax as f32).into(),
@@ -274,8 +274,6 @@ fn spawn_system(
                 ..default()
             })
             .insert(MAIN_CAMERA_LAYER);
-
-        // camera.projection.window_origin = WindowOrigin::BottomLeft;
 
         let s = rendering_done_channel.sender.clone();
 

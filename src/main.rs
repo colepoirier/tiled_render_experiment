@@ -1,7 +1,7 @@
 use bevy::{
     input::mouse::{MouseScrollUnit, MouseWheel},
     prelude::*,
-    render::renderer::RenderDevice,
+    render::{camera::WindowOrigin, renderer::RenderDevice},
     tasks::{AsyncComputeTaskPool, Task},
     utils::hashbrown::HashMap,
 };
@@ -116,15 +116,18 @@ fn main() {
 }
 
 fn setup(mut commands: Commands) {
+    let mut camera = Camera2dBundle {
+        camera: Camera {
+            // renders after the cameras with lower values for priority
+            priority: 2,
+            ..default()
+        },
+        ..Camera2dBundle::default()
+    };
+    camera.projection.window_origin = WindowOrigin::BottomLeft;
+
     commands
-        .spawn_bundle(Camera2dBundle {
-            camera: Camera {
-                // renders after the cameras with lower values for priority
-                priority: 2,
-                ..default()
-            },
-            ..Camera2dBundle::default()
-        })
+        .spawn_bundle(camera)
         .insert(MAIN_CAMERA_LAYER)
         .insert(PanCam::default());
 }
