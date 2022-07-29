@@ -1074,10 +1074,10 @@ struct PostProcessingMaterial {
 
 impl Material2d for PostProcessingMaterial {
     fn vertex_shader() -> ShaderRef {
-        "shaders/rob_vertex.wgsl".into()
+        "shaders/fullscreen.wgsl".into()
     }
     fn fragment_shader() -> ShaderRef {
-        "shaders/custom_material_chromatic_aberration.wgsl".into()
+        "shaders/downscale.wgsl".into()
     }
 }
 
