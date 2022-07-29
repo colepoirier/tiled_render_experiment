@@ -30,6 +30,8 @@ pub type GeoPolygon = geo::Polygon<i64>;
 pub const ALPHA: f32 = 0.1;
 pub const WIDTH: f32 = 10.0;
 
+pub const MAIN_CAMERA_LAYER: RenderLayers = RenderLayers::layer(2);
+
 // #[derive(Debug, Deref, DerefMut)]
 // pub struct Rect(GeoRect);
 
@@ -98,6 +100,10 @@ fn main() {
         .init_resource::<TileMap>()
         .init_resource::<Layers>()
         .init_resource::<LibLayers>()
+        .insert_resource({
+            let (sender, receiver) = bounded::<()>(1);
+            RenderingDone { sender, receiver }
+        })
         .add_event::<OpenVlsirLibCompleteEvent>()
         .add_event::<DrawTileEvent>()
         .init_resource::<Msaa>()
@@ -121,14 +127,18 @@ struct TextureCam;
 #[derive(Debug, Default, Clone, Copy)]
 pub struct OpenVlsirLibCompleteEvent;
 
-fn setup(mut commands: Commands, rd: Res<RenderDevice>) {
-    let lim = rd.limits();
-
-    info!("{lim:?}");
-
-    let (sender, receiver) = bounded::<()>(1);
-
-    commands.insert_resource(RenderingDone { sender, receiver });
+fn setup(mut commands: Commands) {
+    commands
+        .spawn_bundle(Camera2dBundle {
+            camera: Camera {
+                // renders after the cameras with lower values for priority
+                priority: 2,
+                ..default()
+            },
+            ..Camera2dBundle::default()
+        })
+        .insert(MAIN_CAMERA_LAYER)
+        .insert(PanCam::default());
 }
 
 fn spawn_vlsir_open_task_sytem(mut commands: Commands, mut already_done: Local<bool>) {
@@ -872,42 +882,7 @@ fn spawn_system(
 
         commands.spawn_bundle(camera).insert(TextureCam);
 
-        // let second_pass_layer = RenderLayers::layer(1);
-
-        // let mut camera = Camera2dBundle {
-        //     transform: Transform::from_translation(Vec3::new(-2048.0, -2048.0, 999.0)),
-        //     camera: Camera {
-        //         priority: 1,
-        //         ..default()
-        //     },
-        //     ..default()
-        // };
-
-        // camera.projection.window_origin = WindowOrigin::BottomLeft;
-
-        // // info!("{:?}", camera.projection);
-        // camera
-        //     .projection
-        //     .update(size.width as f32, size.height as f32);
-
-        // camera.projection.scale = 4.0;
-
-        // info!("{:?}", camera.projection);
-
-        // // The main pass camera.
-        // commands
-        //     .spawn_bundle(camera)
-        //     .insert(second_pass_layer)
-        //     .insert(PanCam::default());
-
-        // This specifies the layer used for the post processing camera, which will be attached to the post processing camera and 2d quad.
         let post_processing_pass_layer = RenderLayers::layer(1);
-        let main_camera_pass_layer = RenderLayers::layer(2);
-
-        // let quad_handle = meshes.add(Mesh::from(shape::Quad::new(Vec2::new(
-        //     size.width as f32,
-        //     size.height as f32,
-        // ))));
 
         let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
         mesh.insert_attribute(
@@ -983,7 +958,8 @@ fn spawn_system(
                 },
                 ..Camera2dBundle::default()
             })
-            .insert(post_processing_pass_layer);
+            .insert(post_processing_pass_layer)
+            .insert(TextureCam);
 
         commands
             .spawn_bundle(SpriteBundle {
@@ -995,20 +971,9 @@ fn spawn_system(
                 transform: Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
                 ..default()
             })
-            .insert(main_camera_pass_layer);
+            .insert(MAIN_CAMERA_LAYER);
 
-        // The post-processing pass camera.
-        commands
-            .spawn_bundle(Camera2dBundle {
-                camera: Camera {
-                    // renders after the first main camera which has default value: 0.
-                    priority: 2,
-                    ..default()
-                },
-                ..Camera2dBundle::default()
-            })
-            .insert(main_camera_pass_layer)
-            .insert(PanCam::default());
+        // camera.projection.window_origin = WindowOrigin::BottomLeft;
 
         let s = rendering_done.sender.clone();
 
