@@ -94,6 +94,9 @@ impl LayerColors {
     }
 }
 
+#[derive(Debug, Component)]
+pub struct MainCamera;
+
 fn main() {
     App::new()
         .add_plugins(DefaultPlugins)
@@ -112,6 +115,7 @@ fn main() {
         .add_system(spawn_vlsir_open_task_sytem)
         .add_system(handle_vlsir_open_task_system)
         .add_system(load_lib_system)
+        .add_system(camera_changed_system)
         .run();
 }
 
@@ -125,11 +129,19 @@ fn setup(mut commands: Commands) {
         ..Camera2dBundle::default()
     };
     camera.projection.window_origin = WindowOrigin::BottomLeft;
+    camera.projection.scale = 0.075;
 
     commands
         .spawn_bundle(camera)
         .insert(MAIN_CAMERA_LAYER)
+        .insert(MainCamera)
         .insert(PanCam::default());
+}
+
+fn camera_changed_system(camera_q: Query<&Transform, (Changed<Transform>, With<MainCamera>)>) {
+    for c in camera_q.iter() {
+        info!("Camera new transform {:?}", c);
+    }
 }
 
 fn spawn_vlsir_open_task_sytem(mut commands: Commands, mut already_done: Local<bool>) {

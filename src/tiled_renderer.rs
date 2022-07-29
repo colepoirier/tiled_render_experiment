@@ -16,7 +16,7 @@ use bevy::{
 use bevy_prototype_lyon::prelude::*;
 use crossbeam_channel::{bounded, Receiver, Sender};
 
-use crate::{DrawTileEvent, FlattenedElems, Layers, LibLayers, TileMap};
+use crate::{DrawTileEvent, FlattenedElems, Layers, LibLayers, MainCamera, TileMap};
 use layout21::raw;
 
 pub const ALPHA: f32 = 0.1;
@@ -60,6 +60,7 @@ pub struct DownscaledTileMarker;
 
 fn spawn_system(
     mut commands: Commands,
+    mut main_camera_q: Query<&mut Transform, With<MainCamera>>,
     mut images: ResMut<Assets<Image>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut post_processing_materials: ResMut<Assets<PostProcessingMaterial>>,
@@ -263,6 +264,13 @@ fn spawn_system(
             .insert(downscaling_pass_layer)
             .insert(TextureCam);
 
+        let x = (x / 64) as f32;
+        let y = (y / 64) as f32;
+
+        let transform = Transform::from_translation((x, y, 0.0).into());
+
+        // let transform = Transform::from_translation((0.0, 0.0, 0.0).into());
+
         commands
             .spawn_bundle(SpriteBundle {
                 sprite: Sprite {
@@ -271,10 +279,17 @@ fn spawn_system(
                     ..default()
                 },
                 texture: downscaled_image_handle.clone(),
-                transform: Transform::from_translation(Vec3::new(0.0, 0.0, 0.0)),
+                transform,
                 ..default()
             })
             .insert(MAIN_CAMERA_LAYER);
+
+        // info!("sprite coords: x: {x}, y: {y}");
+
+        let mut main_camera_t = main_camera_q.single_mut();
+
+        main_camera_t.translation.x = x;
+        main_camera_t.translation.y = y;
 
         let s = rendering_done_channel.sender.clone();
 
