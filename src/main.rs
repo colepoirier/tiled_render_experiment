@@ -134,15 +134,8 @@ fn spawn_vlsir_open_task_sytem(mut commands: Commands, mut already_done: Local<b
         let thread_pool = AsyncComputeTaskPool::get();
 
         let task: Task<Library> = thread_pool.spawn(async move {
-            // enable to test UI Lib Info "Library:" loading spinner animation
-            // std::thread::sleep(std::time::Duration::from_secs(5));
             let plib = raw::proto::proto::open(
                 "/home/colepoirier/Dropbox/rust_2020_onwards/doug/doug/libs/oscibear.proto",
-                // "/home/colepoirier/Dropbox/rust_2020_onwards/doug/doug/libs/
-                // caravel_chameleon_soc.proto"
-                // "/home/colepoirier/Dropbox/rust_2020_onwards/doug/doug/libs/dff1_lib.proto",
-                // "/home/colepoirier/Dropbox/rust_2020_onwards/doug/doug/libs/
-                // nangate45_bp_multi_6_final.proto"
             )
             .unwrap();
             ProtoImporter::import(&plib, None).unwrap()
@@ -206,7 +199,6 @@ fn load_lib_system(
         let cell_ptr = lib.cells.iter().last().unwrap();
 
         let cell = cell_ptr.read().unwrap();
-        // let cell = lib.cells.iter().rev().nth(1).unwrap().read().unwrap();
 
         let flattened_elems = cell.layout.as_ref().unwrap().flatten().unwrap();
 
@@ -258,9 +250,6 @@ fn load_lib_system(
                         shapes: vec![],
                     },
                 );
-
-                // info!("tile ({ix}, {iy}): xmin: {xmin}, xmax: {xmax}, ymin:
-                // {ymin}, ymax: {ymax}");
             }
 
             x = bbox.p0.x as i64;
@@ -272,16 +261,12 @@ fn load_lib_system(
 
         let t = std::time::Instant::now();
 
-        // let lib_layers = &**lib_layers;
-
         import_cell_shapes(
             tilemap_shift,
             texture_dim,
             &mut tilemap,
             &flattened_elems,
             &mut shape_count,
-            // &lib_layers,
-            // &layers,
         );
 
         info!("DONE {shape_count} shapes in {:?}!", t.elapsed());
@@ -316,39 +301,18 @@ fn get_grid_shape(grid: &Vec<(u32, u32)>) -> (u32, u32) {
 fn stats(grid: &TileMap) {
     let mut counts: Vec<usize> = vec![];
 
-    // let mut max = (0, 0);
-
-    // for (idx, grid) in layers.iter().enumerate() {
-    //     let size = grid.len();
-
-    //     if size > max.1 {
-    //         max = (idx, size);
-    //     }
-    // }
-
-    // println!("{max:?}");
-
-    // let grid = &layers[max.0];
-
     for v in grid.values() {
         counts.push(v.shapes.len());
     }
-
-    // info!("{counts:?}");
 
     let num_occupied_bins = counts.iter().filter(|x| **x != 0).collect::<Vec<_>>().len();
     let min = counts.iter().min().unwrap();
     let max = counts.iter().max().unwrap();
     let num_rects_incl_duplicates = counts.iter().sum::<usize>();
-    // avg_spob = average shapes per occupied bin
+    // average shapes per occupied bin
     let avg_spob = counts.iter().sum::<usize>() / counts.len();
-    // let dev_spob = ((counts.iter().map(|c| (c - avg_spob).pow(2)).sum::<usize>()
-    //     / (counts.len() - 1).max(1)) as f64)
-    //     .powf(0.5);
 
     let grid_size = get_grid_shape(&grid.keys().map(|x| *x).collect::<Vec<(u32, u32)>>());
-
-    // let mut table = vec![];
 
     let mut wtr = Writer::from_path("table_heatmap_data.csv").unwrap();
 
@@ -360,21 +324,12 @@ fn stats(grid: &TileMap) {
         }
 
         wtr.write_record(&row[..]).unwrap();
-
-        // println!("{row}");
     }
 
     wtr.flush().unwrap();
 
-    // let mut f = std::fs::File::create("table_heatmap_data").unwrap();
-
-    // f.write(format!("{table:?}").as_bytes()).unwrap();
-
-    // println!("{table:?}");
-
     let num_bins = (grid_size.0 * grid_size.1) as usize;
     let grid_occupancy = num_occupied_bins as f32 / num_bins as f32;
-    // info!("bin_shape_counts: {counts:?}");
     info!(
         "grid_size: {grid_size:?}, num_bins: {num_bins}, num_occupied_bins: {num_occupied_bins}, num_rects_incl_duplicates: {num_rects_incl_duplicates}"
     );
@@ -383,68 +338,33 @@ fn stats(grid: &TileMap) {
         "avg shapes per occupied bin: {}",
         num_rects_incl_duplicates as f32 / num_occupied_bins as f32
     );
-    // info!("min: {min}, max: {max}, avg_spob: {avg_spob}, dev_spob: {dev_spob}");
     info!("min: {min}, max: {max}, avg_spob: {avg_spob}");
-
-    // println!("number of empty bins: {num_empty_bins}");
 }
 
 pub fn import_cell_shapes(
     tilemap_shift: raw::Point,
     texture_dim: u32,
     tilemap: &mut TileMap,
-    // cell: &Ptr<raw::Cell>,
     elems: &Vec<raw::Element>,
     shape_count: &mut u64,
-    // lib_layers: &raw::Layers,
-    // layers: &HashMap<u8, Color>,
 ) {
-    // let read_cell = cell.read().unwrap();
-    // let read_lib_layers = lib_layers.read().unwrap();
-
-    // let layout = read_cell.layout.as_ref().unwrap();
-
     for (idx, raw::Element { inner, .. }) in elems.iter().enumerate() {
-        // continue;
-        // let layer = lib_layers
-        //     .get(*layer)
-        //     .expect("This Element's LayerKey does not exist in this Library's
-        // Layers")     .layernum as u8;
-
-        // let color = layers.get(&layer).unwrap();
-
-        // .expect(&format!(
-        //     "This Element's layer num: {layer} does not exist in our Layers Resource:
-        // {layers:?}" ));
-
         let mut bbox = inner.bbox();
 
         if !bbox.is_empty() {
-            // info!("{bbox:?}");
-
             bbox.p0 = bbox.p0.shift(&tilemap_shift);
             bbox.p1 = bbox.p1.shift(&tilemap_shift);
 
-            // bbox.p0 = bbox.p0.shift(&offset);
-            // bbox.p1 = bbox.p1.shift(&offset);
-
             let BoundBox { p0, p1 } = bbox;
-
-            // info!("{bbox:?}");
 
             let min_tile_x = p0.x as u32 / texture_dim;
             let min_tile_y = p0.y as u32 / texture_dim;
             let max_tile_x = p1.x as u32 / texture_dim;
             let max_tile_y = p1.y as u32 / texture_dim;
 
-            // info!("inner: {inner:?}");
-
             let geo_shape = match inner {
                 raw::Shape::Rect(r) => {
                     let raw::Rect { p0, p1 } = r;
-
-                    // let p0 = p0.shift(offset);
-                    // let p1 = p1.shift(offset);
 
                     let xmin = p0.x as i64;
                     let ymin = p0.y as i64;
@@ -453,100 +373,19 @@ pub fn import_cell_shapes(
 
                     let rect = GeoRect::new((xmin, ymin), (xmax, ymax));
 
-                    // let lyon_poly = shapes::Polygon {
-                    //     points: vec![
-                    //         (xmin as f32, ymin as f32).into(),
-                    //         (xmax as f32, ymin as f32).into(),
-                    //         (xmax as f32, ymax as f32).into(),
-                    //         (xmin as f32, ymax as f32).into(),
-                    //     ],
-                    //     closed: true,
-                    // };
-
-                    // let transform = Transform::from_translation(Vec3::new(0.0, 0.0, layer as
-                    // f32));
-
-                    // let lyon_shape = GeometryBuilder::build_as(
-                    //     &lyon_poly,
-                    //     DrawMode::Outlined {
-                    //         fill_mode: FillMode {
-                    //             color: *color.clone().set_a(ALPHA),
-                    //             options: FillOptions::default(),
-                    //         },
-                    //         outline_mode: StrokeMode {
-                    //             options: StrokeOptions::default().with_line_width(WIDTH),
-                    //             color: *color,
-                    //         },
-                    //     },
-                    //     transform,
-                    // );
-
                     let geo_shape = GeoShapeEnum::Rect(rect);
 
-                    // info!("georect: {geo_shape:?}");
-
-                    // (
                     geo_shape
-                    //     lyon_shape
-                    // )
                 }
                 raw::Shape::Polygon(p) => {
                     let poly = GeoPolygon::new(
-                        p.points
-                            .iter()
-                            .map(|p| {
-                                // let p = p.shift(offset);
-                                (p.x as i64, p.y as i64)
-                            })
-                            .collect(),
+                        p.points.iter().map(|p| (p.x as i64, p.y as i64)).collect(),
                         vec![],
                     );
 
-                    // let lyon_poly = shapes::Polygon {
-                    //     points: poly
-                    //         .exterior()
-                    //         .coords()
-                    //         .map(|c| Vec2::new(c.x as f32, c.y as f32))
-                    //         .collect::<Vec<Vec2>>(),
-                    //     closed: true,
-                    // };
-
-                    let geo_shape = GeoShapeEnum::Polygon(poly);
-
-                    // let transform = Transform::from_translation(Vec3::new(0.0, 0.0, layer as
-                    // f32));
-
-                    // let lyon_shape = GeometryBuilder::build_as(
-                    //     &lyon_poly,
-                    //     DrawMode::Outlined {
-                    //         fill_mode: FillMode {
-                    //             color: *color.clone().set_a(ALPHA),
-                    //             options: FillOptions::default(),
-                    //         },
-                    //         outline_mode: StrokeMode {
-                    //             options: StrokeOptions::default().with_line_width(WIDTH),
-                    //             color: *color,
-                    //         },
-                    //     },
-                    //     transform,
-                    // );
-
-                    // (
-                    geo_shape
-                    //     lyon_shape
-                    // )
+                    GeoShapeEnum::Polygon(poly)
                 }
                 raw::Shape::Path(p) => {
-                    // let lyon_path = shapes::Polygon {
-                    //     points: p
-                    //         .points
-                    //         .iter()
-                    //         // .map(|p| p.shift(offset))
-                    //         .map(|raw::Point { x, y }| Vec2::new(*x as f32, *y as f32))
-                    //         .collect::<Vec<Vec2>>(),
-                    //     closed: false,
-                    // };
-
                     let num_points = p.points.len();
                     let mut forward_poly_points = Vec::with_capacity(num_points);
                     let mut backward_poly_points = Vec::with_capacity(num_points);
@@ -591,43 +430,13 @@ pub fn import_cell_shapes(
                         vec![],
                     );
 
-                    let geo_shape = GeoShapeEnum::Polygon(poly);
-
-                    // let transform = Transform::from_translation(Vec3::new(0.0, 0.0, layer as
-                    // f32));
-
-                    // let lyon_shape = GeometryBuilder::build_as(
-                    //     &lyon_path,
-                    //     DrawMode::Outlined {
-                    //         fill_mode: FillMode {
-                    //             color: *color.clone().set_a(ALPHA),
-                    //             options: FillOptions::default(),
-                    //         },
-                    //         outline_mode: StrokeMode {
-                    //             options: StrokeOptions::default().with_line_width(p.width as
-                    // f32),             color: *color,
-                    //         },
-                    //     },
-                    //     transform,
-                    // );
-
-                    // (
-                    geo_shape
-                    //     lyon_shape
-                    // )
+                    GeoShapeEnum::Polygon(poly)
                 }
             };
 
-            // info!("offset {offset:?}");
-
             for x in min_tile_x..(max_tile_x + 1) {
                 for y in min_tile_y..(max_tile_y + 1) {
-                    // info!("trying to get tile ({x}, {y}) to insert shape");
                     let Tile { extents, shapes } = tilemap.get_mut(&(x, y)).unwrap();
-                    // .expect(&format!(
-                    //     "trying to get tile ({x}, {y}) to insert
-                    // shape:\n{bbox:#?},\n{geo_shape:#?},\n{inner:#?},\noffset:
-                    // {offset:#?},\ntilemap_shift: {tilemap_shift:#?}" ));
 
                     let extents = &*extents;
 
@@ -638,7 +447,6 @@ pub fn import_cell_shapes(
                             }
                         }
                         GeoShapeEnum::Polygon(p) => {
-                            // info!("{} {extents:?} x {p:?}", *shape_count + 1);
                             if p.intersects(extents) {
                                 shapes.push(idx);
                             }
@@ -654,26 +462,6 @@ pub fn import_cell_shapes(
             info!("shapes processed: {shape_count}");
         }
     }
-
-    // for raw::Instance {
-    //     inst_name: _,
-    //     cell,
-    //     loc,
-    //     reflect_vert: _,
-    //     angle: _,
-    // } in layout.insts.iter()
-    // {
-    //     import_cell_shapes(
-    //         tilemap_shift,
-    //         texture_dim,
-    //         tilemap,
-    //         cell,
-    //         shape_count,
-    //         loc,
-    //         lib_layers,
-    //         layers,
-    //     );
-    // }
 }
 
 #[derive(Debug, Default, Clone, Copy)]
