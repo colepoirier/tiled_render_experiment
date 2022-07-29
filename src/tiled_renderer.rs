@@ -70,9 +70,7 @@ fn spawn_system(
     layers: Res<Layers>,
     mut ev: EventReader<DrawTileEvent>,
     rendering_done_channel: Res<RenderingDoneChannel>,
-    asset_server: Res<AssetServer>,
 ) {
-    asset_server.watch_for_changes().unwrap();
     for DrawTileEvent(key) in ev.iter() {
         let size = Extent3d {
             width: 4096,
@@ -109,7 +107,6 @@ fn spawn_system(
 
         for idx in tile.shapes.iter() {
             let el = &(**flattened_elems)[*idx];
-            // info!("{el:?}");
 
             let layer = lib_layers
                 .get(el.layer)
@@ -127,7 +124,7 @@ fn spawn_system(
 
                 let lyon_poly = shapes::Polygon {
                     points: vec![
-                        (xmin as f32, ymin as f32).into(),
+                        (xmin as f32, ymin as f32).into(), 
                         (xmax as f32, ymin as f32).into(),
                         (xmax as f32, ymax as f32).into(),
                         (xmin as f32, ymax as f32).into(),
@@ -135,11 +132,7 @@ fn spawn_system(
                     closed: true,
                 };
 
-                // info!("{lyon_poly:?}");
-
                 let transform = Transform::from_translation(Vec3::new(0.0, 0.0, layer as f32));
-
-                // let color = Color::rgb(1.0, 0.0, 0.0);
 
                 let lyon_shape = GeometryBuilder::build_as(
                     &lyon_poly,
@@ -153,12 +146,7 @@ fn spawn_system(
                             options: StrokeOptions::default().with_line_width(WIDTH),
                         },
                     },
-                    // DrawMode::Fill(FillMode {
-                    //     color: *color.clone().set_a(ALPHA),
-                    //     options: FillOptions::default(),
-                    // }),
                     transform,
-                    // Transform::default(),
                 );
 
                 commands
@@ -174,17 +162,6 @@ fn spawn_system(
         info!("setting camera transform to {x}, {y}");
 
         let transform = Transform::from_translation(Vec3::new(x as f32, y as f32, 999.0));
-
-        // let transform = Transform::from_translation(Vec3::new(-1000.0, -640_000.0,
-        // 15.0));
-
-        // let transform = Transform::from_translation(Vec3::new(0.0, 0.0, 15.0));
-
-        // let transform = Transform::from_translation(Vec3::new(
-        //     -(size.width as f32) / 2.0,
-        //     -(size.height as f32) / 2.0,
-        //     15.0,
-        // ));
 
         let mut camera = Camera2dBundle {
             camera_2d: Camera2d::default(),
@@ -207,7 +184,7 @@ fn spawn_system(
 
         commands.spawn_bundle(camera).insert(TextureCam);
 
-        let post_processing_pass_layer = RenderLayers::layer(1);
+        let downscaling_pass_layer = RenderLayers::layer(1);
 
         let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
         mesh.insert_attribute(
@@ -243,7 +220,7 @@ fn spawn_system(
                 },
                 ..default()
             })
-            .insert(post_processing_pass_layer);
+            .insert(downscaling_pass_layer);
 
         let size = Extent3d {
             width: 64,
@@ -272,7 +249,7 @@ fn spawn_system(
 
         let downscaled_image_handle = images.add(image);
 
-        // The post-processing pass camera.
+        // The downscaling pass camera.
         commands
             .spawn_bundle(Camera2dBundle {
                 camera: Camera {
@@ -283,7 +260,7 @@ fn spawn_system(
                 },
                 ..Camera2dBundle::default()
             })
-            .insert(post_processing_pass_layer)
+            .insert(downscaling_pass_layer)
             .insert(TextureCam);
 
         commands
