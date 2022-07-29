@@ -11,7 +11,7 @@ use bevy::{
         renderer::RenderQueue,
         view::RenderLayers,
     },
-    sprite::{Material2d, Material2dPlugin, MaterialMesh2dBundle},
+    sprite::{Anchor, Material2d, Material2dPlugin, MaterialMesh2dBundle},
 };
 use bevy_prototype_lyon::prelude::*;
 use crossbeam_channel::{bounded, Receiver, Sender};
@@ -267,6 +267,7 @@ fn spawn_system(
             .spawn_bundle(SpriteBundle {
                 sprite: Sprite {
                     custom_size: Some(Vec2::new(size.width as f32, size.height as f32)),
+                    anchor: Anchor::BottomLeft,
                     ..default()
                 },
                 texture: downscaled_image_handle.clone(),
