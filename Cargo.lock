@@ -3501,6 +3501,7 @@ dependencies = [
  "csv",
  "futures-lite",
  "geo",
+ "itertools 0.10.3",
  "layout21",
  "vlsir 1.0.0",
 ]

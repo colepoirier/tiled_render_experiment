@@ -16,7 +16,9 @@ use bevy::{
 use bevy_prototype_lyon::prelude::*;
 use crossbeam_channel::{bounded, Receiver, Sender};
 
-use crate::{DrawTileEvent, FlattenedElems, Layers, LibLayers, MainCamera, TileMap};
+use crate::{
+    DrawTileEvent, FlattenedElems, Layers, LibLayers, MainCamera, RenderingCompleteEvent, TileMap,
+};
 use layout21::raw;
 
 pub const ALPHA: f32 = 0.1;
@@ -36,6 +38,7 @@ impl Plugin for TiledRendererPlugin {
             })
             .add_system(despawn_system)
             .add_system(spawn_system);
+        // .add_system(assets_debug_system);
     }
 }
 
@@ -44,11 +47,9 @@ struct RenderingDoneChannel {
     receiver: Receiver<()>,
 }
 
-// Marks the first pass cube (rendered to a texture.)
 #[derive(Component)]
 struct LyonShape;
 
-// Marks the first pass cube (rendered to a texture.)
 #[derive(Component)]
 struct TextureCam;
 
@@ -61,6 +62,8 @@ pub struct DownscaledTileMarker;
 fn spawn_system(
     mut commands: Commands,
     mut main_camera_q: Query<&mut Transform, With<MainCamera>>,
+    // texture_q: Query<&Handle<Image>, With<HiResTileMarker>>,
+    mut rendering_texture: Local<Option<Handle<Image>>>,
     mut images: ResMut<Assets<Image>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut post_processing_materials: ResMut<Assets<PostProcessingMaterial>>,
@@ -73,34 +76,55 @@ fn spawn_system(
     rendering_done_channel: Res<RenderingDoneChannel>,
 ) {
     for DrawTileEvent(key) in ev.iter() {
-        let size = Extent3d {
-            width: 4096,
-            height: 4096,
-            ..default()
+        // let source_image_handle = if let Ok(image) = texture_q.get_single() {
+        //     image.clone()
+        // } else {
+
+        let source_image_handle = if let Some(handle) = rendering_texture.as_ref() {
+            info!("reusing texture");
+            handle.clone()
+        } else {
+            let size = Extent3d {
+                width: 4096,
+                height: 4096,
+                ..default()
+            };
+
+            // This is the texture that will be rendered to.
+            let mut image = Image {
+                texture_descriptor: TextureDescriptor {
+                    label: None,
+                    size,
+                    dimension: TextureDimension::D2,
+                    format: TextureFormat::Bgra8UnormSrgb,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    usage: TextureUsages::TEXTURE_BINDING
+                        | TextureUsages::COPY_DST
+                        | TextureUsages::RENDER_ATTACHMENT,
+                },
+                ..default()
+            };
+
+            // fill image.data with zeroes
+            image.resize(size);
+
+            let handle = images.add(image);
+
+            *rendering_texture = Some(handle.clone());
+
+            info!("creating new texture");
+
+            handle
         };
 
-        // This is the texture that will be rendered to.
-        let mut image = Image {
-            texture_descriptor: TextureDescriptor {
-                label: None,
-                size,
-                dimension: TextureDimension::D2,
-                format: TextureFormat::Bgra8UnormSrgb,
-                mip_level_count: 1,
-                sample_count: 1,
-                usage: TextureUsages::TEXTURE_BINDING
-                    | TextureUsages::COPY_DST
-                    | TextureUsages::RENDER_ATTACHMENT,
-            },
-            ..default()
-        };
+        // commands
+        //     .spawn()
+        //     .insert(image.clone())
+        //     .insert(HiResTileMarker);
 
-        // fill image.data with zeroes
-        image.resize(size);
-        // halfsized_image.resize(half_size);
-
-        let source_image_handle = images.add(image);
-        // let halfsized_image_handle = images.add(halfsized_image);
+        // image
+        // };
 
         let tile = tilemap.get(key).unwrap();
 
@@ -176,10 +200,10 @@ fn spawn_system(
 
         camera.projection.window_origin = WindowOrigin::BottomLeft;
 
+        let size = images.get(&source_image_handle).unwrap().size();
+
         info!("{:?}", camera.projection);
-        camera
-            .projection
-            .update(size.width as f32, size.height as f32);
+        camera.projection.update(size.x as f32, size.y as f32);
 
         info!("{:?}", camera.projection);
 
@@ -305,6 +329,7 @@ fn despawn_system(
     cam_q: Query<Entity, With<TextureCam>>,
     shape_q: Query<Entity, With<LyonShape>>,
     rendering_done_channel: Res<RenderingDoneChannel>,
+    mut rendering_complete_ev: EventWriter<RenderingCompleteEvent>,
 ) {
     if let Ok(()) = rendering_done_channel.receiver.try_recv() {
         info!("RENDERING DONE");
@@ -316,6 +341,16 @@ fn despawn_system(
             // info!("despawn shape");
             commands.entity(s).despawn();
         }
+        rendering_complete_ev.send_default();
+    }
+}
+
+fn assets_debug_system(q: Query<(Entity, &Handle<Image>)>, assets: Res<Assets<Image>>) {
+    info!("{}", q.iter().len());
+
+    for (e, h) in q.iter() {
+        let i = assets.get(h).unwrap();
+        info!("{} {h:?}", i.size());
     }
 }
 

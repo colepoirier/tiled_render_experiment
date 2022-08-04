@@ -6,9 +6,12 @@ use bevy::{
     utils::hashbrown::HashMap,
 };
 
+use std::ops::Range;
+
 use csv::Writer;
 use futures_lite::future;
 use geo::Intersects;
+use itertools::Itertools;
 use layout21::raw::{self, proto::ProtoImporter, BoundBox, BoundBoxTrait, Library};
 
 pub mod tiled_renderer;
@@ -42,9 +45,7 @@ impl std::fmt::Debug for Tile {
 }
 
 #[derive(Debug, Default, Deref, DerefMut)]
-pub struct TileMapResource(TileMap);
-
-pub type TileMap = HashMap<(u32, u32), Tile>;
+pub struct TileMap(HashMap<(u32, u32), Tile>);
 
 #[derive(Debug, Default, Deref, DerefMut)]
 pub struct FlattenedElems(Vec<raw::Element>);
@@ -94,6 +95,15 @@ impl LayerColors {
     }
 }
 
+#[derive(Debug, Default, Deref, DerefMut)]
+pub struct TileIndexIter(Option<itertools::Product<Range<u32>, Range<u32>>>);
+
+#[derive(Debug, Default, Clone, Copy)]
+struct DrawTileEvent((u32, u32));
+
+#[derive(Debug, Default)]
+struct RenderingCompleteEvent;
+
 #[derive(Debug, Component)]
 pub struct MainCamera;
 
@@ -108,13 +118,17 @@ fn main() {
         .init_resource::<TileMap>()
         .init_resource::<Layers>()
         .init_resource::<LibLayers>()
+        .init_resource::<TileIndexIter>()
         .add_event::<OpenVlsirLibCompleteEvent>()
         .add_event::<DrawTileEvent>()
+        .add_event::<TileIndexIter>()
+        .add_event::<RenderingCompleteEvent>()
         .init_resource::<Msaa>()
         .add_startup_system(setup)
         .add_system(spawn_vlsir_open_task_sytem)
         .add_system(handle_vlsir_open_task_system)
         .add_system(load_lib_system)
+        .add_system(iter_tile_index_system)
         .add_system(camera_changed_system)
         .run();
 }
@@ -184,6 +198,7 @@ fn load_lib_system(
     mut lib_layers: ResMut<LibLayers>,
     render_device: Res<RenderDevice>,
     mut tilemap: ResMut<TileMap>,
+    mut tile_index_iter: ResMut<TileIndexIter>,
     mut flattened_elems_res: ResMut<FlattenedElems>,
     mut ev: EventWriter<DrawTileEvent>,
 ) {
@@ -290,13 +305,40 @@ fn load_lib_system(
 
         stats(&tilemap);
 
-        ev.send(DrawTileEvent((14, 260)));
+        let (x, y) = get_grid_shape(&tilemap);
+
+        let mut index_iter = (170..180).cartesian_product(0..x);
+
+        let (y, x) = index_iter.next().unwrap();
+
+        *tile_index_iter = TileIndexIter(Some(index_iter));
+
+        ev.send(DrawTileEvent((x, y)));
     }
 }
 
-fn get_grid_shape(grid: &Vec<(u32, u32)>) -> (u32, u32) {
+fn iter_tile_index_system(
+    mut tile_index_iter: ResMut<TileIndexIter>,
+    mut draw_tile_ev: EventWriter<DrawTileEvent>,
+    mut rendering_complete_ev: EventReader<RenderingCompleteEvent>,
+) {
+    for _ in rendering_complete_ev.iter() {
+        if tile_index_iter.is_some() {
+            if let Some((y, x)) = (**tile_index_iter).as_mut().unwrap().next() {
+                // if (x < 40) && (y == 170) {
+                let event = DrawTileEvent((x, y));
+                info!("Sending {event:?}");
+                draw_tile_ev.send(event);
+                // std::thread::sleep(std::time::Duration::from_millis(200));
+                // }
+            }
+        }
+    }
+}
+
+fn get_grid_shape(grid: &TileMap) -> (u32, u32) {
     let (mut x_min, mut x_max, mut y_min, mut y_max) = (0, 0, 0, 0);
-    for &(x, y) in grid.iter() {
+    for &(x, y) in grid.keys() {
         if x < x_min {
             x_min = x;
         } else if x > x_max {
@@ -327,7 +369,7 @@ fn stats(grid: &TileMap) {
     // average shapes per occupied bin
     let avg_spob = counts.iter().sum::<usize>() / counts.len();
 
-    let grid_size = get_grid_shape(&grid.keys().map(|x| *x).collect::<Vec<(u32, u32)>>());
+    let grid_size = get_grid_shape(&grid);
 
     let mut wtr = Writer::from_path("table_heatmap_data.csv").unwrap();
 
@@ -478,9 +520,6 @@ pub fn import_cell_shapes(
         }
     }
 }
-
-#[derive(Debug, Default, Clone, Copy)]
-struct DrawTileEvent((u32, u32));
 
 #[derive(Default)]
 pub struct PanCamPlugin;
