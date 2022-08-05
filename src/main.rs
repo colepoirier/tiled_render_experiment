@@ -112,6 +112,10 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .add_plugin(PanCamPlugin)
         .add_plugin(TiledRendererPlugin)
+        .insert_resource(WindowDescriptor {
+            present_mode: bevy::window::PresentMode::Immediate,
+            ..default()
+        })
         .init_resource::<LayerColors>()
         .init_resource::<VlsirLib>()
         .init_resource::<FlattenedElems>()
@@ -307,7 +311,7 @@ fn load_lib_system(
 
         let (x, y) = get_grid_shape(&tilemap);
 
-        let mut index_iter = (170..180).cartesian_product(0..x);
+        let mut index_iter = (0..y).cartesian_product(0..x);
 
         let (y, x) = index_iter.next().unwrap();
 

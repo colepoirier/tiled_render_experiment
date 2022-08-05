@@ -21,6 +21,8 @@ use crate::{
 };
 use layout21::raw;
 
+use std::time::{Duration, Instant};
+
 pub const ALPHA: f32 = 0.1;
 pub const WIDTH: f32 = 10.0;
 
@@ -47,7 +49,7 @@ struct RenderingDoneChannel {
     receiver: Receiver<()>,
 }
 
-#[derive(Component)]
+#[derive(Component, Clone)]
 struct LyonShape;
 
 #[derive(Component)]
@@ -59,10 +61,16 @@ pub struct HiResTileMarker;
 #[derive(Debug, Clone, Copy, Component)]
 pub struct DownscaledTileMarker;
 
+#[derive(Bundle)]
+pub struct LyonShapeBundle {
+    #[bundle]
+    lyon: bevy_prototype_lyon::entity::ShapeBundle,
+    marker: LyonShape,
+}
+
 fn spawn_system(
     mut commands: Commands,
-    mut main_camera_q: Query<&mut Transform, With<MainCamera>>,
-    // texture_q: Query<&Handle<Image>, With<HiResTileMarker>>,
+    mut main_camera_q: Query<&mut Transform, (With<MainCamera>, Without<LyonShape>)>,
     mut rendering_texture: Local<Option<Handle<Image>>>,
     mut images: ResMut<Assets<Image>>,
     mut meshes: ResMut<Assets<Mesh>>,
@@ -74,12 +82,16 @@ fn spawn_system(
     layers: Res<Layers>,
     mut ev: EventReader<DrawTileEvent>,
     rendering_done_channel: Res<RenderingDoneChannel>,
+    mut existing_lyon_shapes: Query<
+        (
+            &mut bevy_prototype_lyon::entity::Path,
+            &mut Transform,
+            &mut Visibility,
+        ),
+        With<LyonShape>,
+    >,
 ) {
     for DrawTileEvent(key) in ev.iter() {
-        // let source_image_handle = if let Ok(image) = texture_q.get_single() {
-        //     image.clone()
-        // } else {
-
         let source_image_handle = if let Some(handle) = rendering_texture.as_ref() {
             info!("reusing texture");
             handle.clone()
@@ -129,7 +141,11 @@ fn spawn_system(
         let tile = tilemap.get(key).unwrap();
 
         // let read_lib_layers = lib_layers.read().unwrap();
+        // let mut bundle_vec = Vec::with_capacity(tile.shapes.len());
 
+        info!("Num shapes in this tile: {}", tile.shapes.len());
+
+        let mut existing_shapes_iter = existing_lyon_shapes.iter_mut();
         for idx in tile.shapes.iter() {
             let el = &(**flattened_elems)[*idx];
 
@@ -174,12 +190,36 @@ fn spawn_system(
                     transform,
                 );
 
-                commands
-                    .spawn_bundle(lyon_shape)
-                    .insert_bundle(VisibilityBundle::default())
-                    .insert(LyonShape);
+                let bundle = LyonShapeBundle {
+                    lyon: lyon_shape,
+                    marker: LyonShape,
+                };
+
+                // bundle_vec.push(bundle);
+
+                if let Some((mut existing_path, mut existing_transform, mut vis)) =
+                    existing_shapes_iter.next()
+                {
+                    *existing_path = bundle.lyon.path;
+                    *existing_transform = bundle.lyon.transform;
+                    vis.is_visible = true;
+                } else {
+                    commands.spawn_bundle(bundle);
+                }
             }
         }
+
+        // commands.spawn_batch(bundle_vec);
+
+        // let len = bundle_vec.len();
+        // let start = Instant::now();
+        // drop(bundle_vec);
+        // let end = start.elapsed();
+        // let drop_time = end.as_micros();
+        // info!(
+        //     "took {drop_time} ms to drop a vec of {len} bundles (average: {} ms/bundle)",
+        //     drop_time / (len as u128)
+        // );
 
         let x = tile.extents.min().x / 4;
         let y = tile.extents.min().y / 4;
@@ -327,7 +367,7 @@ fn spawn_system(
 fn despawn_system(
     mut commands: Commands,
     cam_q: Query<Entity, With<TextureCam>>,
-    shape_q: Query<Entity, With<LyonShape>>,
+    mut shape_q: Query<&mut Visibility, With<LyonShape>>,
     rendering_done_channel: Res<RenderingDoneChannel>,
     mut rendering_complete_ev: EventWriter<RenderingCompleteEvent>,
 ) {
@@ -337,9 +377,10 @@ fn despawn_system(
             info!("despawn camera");
             commands.entity(cam).despawn();
         }
-        for s in shape_q.iter() {
+        for mut vis in shape_q.iter_mut() {
             // info!("despawn shape");
-            commands.entity(s).despawn();
+            // commands.entity(s).despawn();
+            vis.is_visible = false;
         }
         rendering_complete_ev.send_default();
     }
