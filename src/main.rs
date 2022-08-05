@@ -133,7 +133,7 @@ fn main() {
         .add_system(handle_vlsir_open_task_system)
         .add_system(load_lib_system)
         .add_system(iter_tile_index_system)
-        .add_system(camera_changed_system)
+        // .add_system(camera_changed_system)
         .run();
 }
 

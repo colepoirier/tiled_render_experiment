@@ -39,7 +39,8 @@ impl Plugin for TiledRendererPlugin {
                 RenderingDoneChannel { sender, receiver }
             })
             .add_system(despawn_system)
-            .add_system(spawn_system);
+            .add_system(spawn_shapes_system)
+            .add_system(spawn_cameras_system.after(spawn_shapes_system));
         // .add_system(assets_debug_system);
     }
 }
@@ -68,20 +69,13 @@ pub struct LyonShapeBundle {
     marker: LyonShape,
 }
 
-fn spawn_system(
+fn spawn_shapes_system(
     mut commands: Commands,
-    mut main_camera_q: Query<&mut Transform, (With<MainCamera>, Without<LyonShape>)>,
-    mut rendering_texture: Local<Option<Handle<Image>>>,
-    mut images: ResMut<Assets<Image>>,
-    mut meshes: ResMut<Assets<Mesh>>,
-    mut post_processing_materials: ResMut<Assets<PostProcessingMaterial>>,
-    render_queue: Res<RenderQueue>,
     tilemap: Res<TileMap>,
     flattened_elems: Res<FlattenedElems>,
     lib_layers: Res<LibLayers>,
     layers: Res<Layers>,
-    mut ev: EventReader<DrawTileEvent>,
-    rendering_done_channel: Res<RenderingDoneChannel>,
+    mut draw_ev: EventReader<DrawTileEvent>,
     mut existing_lyon_shapes: Query<
         (
             &mut bevy_prototype_lyon::entity::Path,
@@ -91,53 +85,7 @@ fn spawn_system(
         With<LyonShape>,
     >,
 ) {
-    for DrawTileEvent(key) in ev.iter() {
-        let source_image_handle = if let Some(handle) = rendering_texture.as_ref() {
-            info!("reusing texture");
-            handle.clone()
-        } else {
-            let size = Extent3d {
-                width: 4096,
-                height: 4096,
-                ..default()
-            };
-
-            // This is the texture that will be rendered to.
-            let mut image = Image {
-                texture_descriptor: TextureDescriptor {
-                    label: None,
-                    size,
-                    dimension: TextureDimension::D2,
-                    format: TextureFormat::Bgra8UnormSrgb,
-                    mip_level_count: 1,
-                    sample_count: 1,
-                    usage: TextureUsages::TEXTURE_BINDING
-                        | TextureUsages::COPY_DST
-                        | TextureUsages::RENDER_ATTACHMENT,
-                },
-                ..default()
-            };
-
-            // fill image.data with zeroes
-            image.resize(size);
-
-            let handle = images.add(image);
-
-            *rendering_texture = Some(handle.clone());
-
-            info!("creating new texture");
-
-            handle
-        };
-
-        // commands
-        //     .spawn()
-        //     .insert(image.clone())
-        //     .insert(HiResTileMarker);
-
-        // image
-        // };
-
+    for DrawTileEvent(key) in draw_ev.iter() {
         let tile = tilemap.get(key).unwrap();
 
         // let read_lib_layers = lib_layers.read().unwrap();
@@ -195,8 +143,6 @@ fn spawn_system(
                     marker: LyonShape,
                 };
 
-                // bundle_vec.push(bundle);
-
                 if let Some((mut existing_path, mut existing_transform, mut vis)) =
                     existing_shapes_iter.next()
                 {
@@ -208,23 +154,65 @@ fn spawn_system(
                 }
             }
         }
+    }
+}
 
-        // commands.spawn_batch(bundle_vec);
+fn spawn_cameras_system(
+    mut commands: Commands,
+    mut main_camera_q: Query<&mut Transform, With<MainCamera>>,
+    mut rendering_texture: Local<Option<Handle<Image>>>,
+    mut images: ResMut<Assets<Image>>,
+    mut meshes: ResMut<Assets<Mesh>>,
+    mut post_processing_materials: ResMut<Assets<PostProcessingMaterial>>,
+    render_queue: Res<RenderQueue>,
+    tilemap: Res<TileMap>,
+    mut draw_ev: EventReader<DrawTileEvent>,
+    rendering_done_channel: Res<RenderingDoneChannel>,
+) {
+    for DrawTileEvent(key) in draw_ev.iter() {
+        let source_image_handle = if let Some(handle) = rendering_texture.as_ref() {
+            // info!("reusing texture");
+            (*handle).clone()
+        } else {
+            let size = Extent3d {
+                width: 4096,
+                height: 4096,
+                ..default()
+            };
 
-        // let len = bundle_vec.len();
-        // let start = Instant::now();
-        // drop(bundle_vec);
-        // let end = start.elapsed();
-        // let drop_time = end.as_micros();
-        // info!(
-        //     "took {drop_time} ms to drop a vec of {len} bundles (average: {} ms/bundle)",
-        //     drop_time / (len as u128)
-        // );
+            // This is the texture that will be rendered to.
+            let mut image = Image {
+                texture_descriptor: TextureDescriptor {
+                    label: None,
+                    size,
+                    dimension: TextureDimension::D2,
+                    format: TextureFormat::Bgra8UnormSrgb,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    usage: TextureUsages::TEXTURE_BINDING
+                        | TextureUsages::COPY_DST
+                        | TextureUsages::RENDER_ATTACHMENT,
+                },
+                ..default()
+            };
 
+            // fill image.data with zeroes
+            image.resize(size);
+
+            let handle = images.add(image);
+
+            *rendering_texture = Some(handle.clone());
+
+            info!("creating new texture");
+
+            handle
+        };
+
+        let tile = tilemap.get(key).unwrap();
         let x = tile.extents.min().x / 4;
         let y = tile.extents.min().y / 4;
 
-        info!("setting camera transform to {x}, {y}");
+        // info!("setting camera transform to {x}, {y}");
 
         let transform = Transform::from_translation(Vec3::new(x as f32, y as f32, 999.0));
 
@@ -242,10 +230,10 @@ fn spawn_system(
 
         let size = images.get(&source_image_handle).unwrap().size();
 
-        info!("{:?}", camera.projection);
+        // info!("{:?}", camera.projection);
         camera.projection.update(size.x as f32, size.y as f32);
 
-        info!("{:?}", camera.projection);
+        // info!("{:?}", camera.projection);
 
         commands.spawn_bundle(camera).insert(TextureCam);
 
@@ -328,38 +316,34 @@ fn spawn_system(
             .insert(downscaling_pass_layer)
             .insert(TextureCam);
 
-        let x = (x / 64) as f32;
-        let y = (y / 64) as f32;
+        // let x = (x / 64) as f32;
+        // let y = (y / 64) as f32;
 
-        let transform = Transform::from_translation((x, y, 0.0).into());
+        // let transform = Transform::from_translation((x, y, 0.0).into());
 
-        // let transform = Transform::from_translation((0.0, 0.0, 0.0).into());
+        // commands
+        //     .spawn_bundle(SpriteBundle {
+        //         sprite: Sprite {
+        //             custom_size: Some(Vec2::new(size.width as f32, size.height as f32)),
+        //             anchor: Anchor::BottomLeft,
+        //             ..default()
+        //         },
+        //         texture: downscaled_image_handle.clone(),
+        //         transform,
+        //         ..default()
+        //     })
+        //     .insert(MAIN_CAMERA_LAYER);
 
-        commands
-            .spawn_bundle(SpriteBundle {
-                sprite: Sprite {
-                    custom_size: Some(Vec2::new(size.width as f32, size.height as f32)),
-                    anchor: Anchor::BottomLeft,
-                    ..default()
-                },
-                texture: downscaled_image_handle.clone(),
-                transform,
-                ..default()
-            })
-            .insert(MAIN_CAMERA_LAYER);
+        // let mut main_camera_t = main_camera_q.single_mut();
 
-        // info!("sprite coords: x: {x}, y: {y}");
-
-        let mut main_camera_t = main_camera_q.single_mut();
-
-        main_camera_t.translation.x = x;
-        main_camera_t.translation.y = y;
+        // main_camera_t.translation.x = x;
+        // main_camera_t.translation.y = y;
 
         let s = rendering_done_channel.sender.clone();
 
         render_queue.on_submitted_work_done(move || {
             s.send(()).unwrap();
-            info!("work done event sent!");
+            // info!("work done event sent!");
         });
     }
 }
@@ -374,7 +358,7 @@ fn despawn_system(
     if let Ok(()) = rendering_done_channel.receiver.try_recv() {
         info!("RENDERING DONE");
         for cam in cam_q.iter() {
-            info!("despawn camera");
+            // info!("despawn camera");
             commands.entity(cam).despawn();
         }
         for mut vis in shape_q.iter_mut() {
