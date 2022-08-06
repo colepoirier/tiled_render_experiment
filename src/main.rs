@@ -47,6 +47,12 @@ impl std::fmt::Debug for Tile {
 #[derive(Debug, Default, Deref, DerefMut)]
 pub struct TileMap(HashMap<(u32, u32), Tile>);
 
+#[derive(Debug, Default)]
+pub struct TileMapLowerLeft {
+    x: i64,
+    y: i64,
+};
+
 #[derive(Debug, Default, Deref, DerefMut)]
 pub struct FlattenedElems(Vec<raw::Element>);
 
@@ -120,6 +126,7 @@ fn main() {
         .init_resource::<VlsirLib>()
         .init_resource::<FlattenedElems>()
         .init_resource::<TileMap>()
+        .init_resource::<TileMapLowerLeft>()
         .init_resource::<Layers>()
         .init_resource::<LibLayers>()
         .init_resource::<TileIndexIter>()
@@ -204,6 +211,7 @@ fn load_lib_system(
     mut tilemap: ResMut<TileMap>,
     mut tile_index_iter: ResMut<TileIndexIter>,
     mut flattened_elems_res: ResMut<FlattenedElems>,
+    mut min_offset_res: ResMut<TileMapLowerLeft>,
     mut ev: EventWriter<DrawTileEvent>,
 ) {
     let texture_dim = render_device.limits().max_texture_dimension_2d;
@@ -244,6 +252,7 @@ fn load_lib_system(
         }
 
         assert!(!bbox.is_empty(), "bbox must be valid!");
+        *min_offset_res = TileMapLowerLeft { x: bbox.p0.x as i64, y: bbox.p0.y as i64 };
 
         info!("flattened bbox is {bbox:?}");
 
