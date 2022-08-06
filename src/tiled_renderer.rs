@@ -18,7 +18,7 @@ use crossbeam_channel::{bounded, Receiver, Sender};
 
 use crate::{
     get_grid_shape, DrawTileEvent, FlattenedElems, Layers, LibLayers, MainCamera,
-    RenderingCompleteEvent, TileMap,
+    RenderingCompleteEvent, TileMap, TileMapLowerLeft,
 };
 use layout21::raw;
 
@@ -171,6 +171,7 @@ fn spawn_cameras_system(
     mut post_processing_materials: ResMut<Assets<PostProcessingMaterial>>,
     render_queue: Res<RenderQueue>,
     tilemap: Res<TileMap>,
+    lower_left_res: Res<TileMapLowerLeft>,
     mut draw_ev: EventReader<DrawTileEvent>,
     rendering_done_channel: Res<RenderingDoneChannel>,
 ) {
@@ -291,8 +292,12 @@ fn spawn_cameras_system(
         };
 
         let tile = tilemap.get(key).unwrap();
-        let x = tile.extents.min().x / 4;
-        let y = tile.extents.min().y / 4;
+        let tile_x = tile.extents.min().x - lower_left_res.x;
+        let tile_y = tile.extents.min().y - lower_left_res.y;
+        assert!(tile_x > 0, "tile_x should be positive");
+        assert!(tile_y > 0, "tile_y should be positive");
+        let x = tile_x / 4;
+        let y = tile_y / 4;
 
         // info!("setting camera transform to {x}, {y}");
 
@@ -323,7 +328,7 @@ fn spawn_cameras_system(
         let accumulation_pass_layer = RenderLayers::layer(2);
 
         let (mesh_handle, material_handle) =
-            if let Some((mesh_handle, material_handle)) = mesh_and_material {
+            if let Some((mesh_handle, material_handle)) = mesh_and_material.as_ref() {
                 ((*mesh_handle).clone(), (*material_handle).clone())
             } else {
                 let mut mesh = Mesh::new(PrimitiveTopology::TriangleList);
@@ -390,7 +395,7 @@ fn spawn_cameras_system(
                     target: RenderTarget::Image(accumulation_handle.clone()),
                     viewport: Some(Viewport {
                         // this is the same as the calculations we were doing to properly place the small texture's sprite
-                        physical_position: UVec2::new(x / 64, y / 64),
+                        physical_position: UVec2::new((x / 64) as u32, (y / 64) as u32),
                         physical_size: UVec2::new(64, 64),
                         depth: Default::default(),
                     }),
