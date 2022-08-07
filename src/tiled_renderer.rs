@@ -165,7 +165,7 @@ fn spawn_cameras_system(
     mut hires_texture: Local<Option<Handle<Image>>>,
     mut lores_texture: Local<Option<Handle<Image>>>,
     mut accumulation_texture: Local<Option<Handle<Image>>>,
-    mesh_and_material: Local<Option<(Handle<Mesh>, Handle<PostProcessingMaterial>)>>,
+    mut mesh_and_material: Local<Option<(Handle<Mesh>, Handle<PostProcessingMaterial>)>>,
     mut images: ResMut<Assets<Image>>,
     mut meshes: ResMut<Assets<Mesh>>,
     mut post_processing_materials: ResMut<Assets<PostProcessingMaterial>>,
@@ -182,8 +182,8 @@ fn spawn_cameras_system(
         } else {
             let (grid_x, grid_y) = get_grid_shape(&tilemap);
             let size = Extent3d {
-                width: grid_x * 64,
-                height: grid_y * 64,
+                width: grid_x * 32,
+                height: grid_y * 32,
                 ..default()
             };
 
@@ -258,8 +258,8 @@ fn spawn_cameras_system(
             (*handle).clone()
         } else {
             let size = Extent3d {
-                width: 64,
-                height: 64,
+                width: 32,
+                height: 32,
                 ..default()
             };
 
@@ -294,8 +294,12 @@ fn spawn_cameras_system(
         let tile = tilemap.get(key).unwrap();
         let tile_x = tile.extents.min().x - lower_left_res.x;
         let tile_y = tile.extents.min().y - lower_left_res.y;
-        assert!(tile_x > 0, "tile_x should be positive");
-        assert!(tile_y > 0, "tile_y should be positive");
+
+        // info!("{tile_x}");
+        // info!("{tile_y}");
+
+        assert!(tile_x >= 0, "tile_x should be positive");
+        assert!(tile_y >= 0, "tile_y should be positive");
         let x = tile_x / 4;
         let y = tile_y / 4;
 
@@ -395,8 +399,8 @@ fn spawn_cameras_system(
                     target: RenderTarget::Image(accumulation_handle.clone()),
                     viewport: Some(Viewport {
                         // this is the same as the calculations we were doing to properly place the small texture's sprite
-                        physical_position: UVec2::new((x / 64) as u32, (y / 64) as u32),
-                        physical_size: UVec2::new(64, 64),
+                        physical_position: UVec2::new((x / 128) as u32, (y / 128) as u32),
+                        physical_size: UVec2::new(32, 32),
                         depth: Default::default(),
                     }),
                     ..default()

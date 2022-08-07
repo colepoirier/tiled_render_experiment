@@ -51,7 +51,7 @@ pub struct TileMap(HashMap<(u32, u32), Tile>);
 pub struct TileMapLowerLeft {
     x: i64,
     y: i64,
-};
+}
 
 #[derive(Debug, Default, Deref, DerefMut)]
 pub struct FlattenedElems(Vec<raw::Element>);
