@@ -1,7 +1,10 @@
 use bevy::{
     input::mouse::{MouseScrollUnit, MouseWheel},
     prelude::*,
-    render::{camera::WindowOrigin, renderer::RenderDevice},
+    render::{
+        camera::{Projection, WindowOrigin},
+        renderer::RenderDevice,
+    },
     tasks::{AsyncComputeTaskPool, Task},
     utils::hashbrown::HashMap,
 };
@@ -115,13 +118,15 @@ pub struct MainCamera;
 
 fn main() {
     App::new()
-        .add_plugins(DefaultPlugins)
-        .add_plugin(PanCamPlugin)
-        .add_plugin(TiledRendererPlugin)
         .insert_resource(WindowDescriptor {
+            width: 1920.0,
+            height: 1080.0,
             present_mode: bevy::window::PresentMode::Immediate,
             ..default()
         })
+        .add_plugins(DefaultPlugins)
+        .add_plugin(PanCamPlugin)
+        .add_plugin(TiledRendererPlugin)
         .init_resource::<LayerColors>()
         .init_resource::<VlsirLib>()
         .init_resource::<FlattenedElems>()
@@ -140,7 +145,7 @@ fn main() {
         .add_system(handle_vlsir_open_task_system)
         .add_system(load_lib_system)
         .add_system(iter_tile_index_system)
-        // .add_system(camera_changed_system)
+        .add_system(camera_changed_system)
         .run();
 }
 
@@ -148,13 +153,14 @@ fn setup(mut commands: Commands) {
     let mut camera = Camera2dBundle {
         camera: Camera {
             // renders after the cameras with lower values for priority
-            priority: 2,
+            priority: 3,
             ..default()
         },
+        transform: Transform::from_translation((-9284.8, -100.0, 999.0).into()),
         ..Camera2dBundle::default()
     };
     camera.projection.window_origin = WindowOrigin::BottomLeft;
-    camera.projection.scale = 0.075;
+    camera.projection.scale = 13.0;
 
     commands
         .spawn_bundle(camera)
@@ -163,9 +169,17 @@ fn setup(mut commands: Commands) {
         .insert(PanCam::default());
 }
 
-fn camera_changed_system(camera_q: Query<&Transform, (Changed<Transform>, With<MainCamera>)>) {
-    for c in camera_q.iter() {
-        info!("Camera new transform {:?}", c);
+fn camera_changed_system(
+    camera_q: Query<
+        (&Transform, &OrthographicProjection),
+        (
+            Or<(Changed<Transform>, Changed<OrthographicProjection>)>,
+            With<MainCamera>,
+        ),
+    >,
+) {
+    for (t, proj) in camera_q.iter() {
+        info!("Camera new transform {t:?}, scale {}", proj.scale);
     }
 }
 
@@ -252,7 +266,10 @@ fn load_lib_system(
         }
 
         assert!(!bbox.is_empty(), "bbox must be valid!");
-        *min_offset_res = TileMapLowerLeft { x: bbox.p0.x as i64, y: bbox.p0.y as i64 };
+        *min_offset_res = TileMapLowerLeft {
+            x: bbox.p0.x as i64,
+            y: bbox.p0.y as i64,
+        };
 
         info!("flattened bbox is {bbox:?}");
 

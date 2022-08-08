@@ -28,7 +28,9 @@ use std::time::{Duration, Instant};
 pub const ALPHA: f32 = 0.1;
 pub const WIDTH: f32 = 10.0;
 
-pub const MAIN_CAMERA_LAYER: RenderLayers = RenderLayers::layer(2);
+pub const DOWNSCALING_PASS_LAYER: RenderLayers = RenderLayers::layer(1);
+pub const ACCUMULATION_PASS_LAYER: RenderLayers = RenderLayers::layer(2);
+pub const MAIN_CAMERA_LAYER: RenderLayers = RenderLayers::layer(3);
 
 pub struct TiledRendererPlugin;
 
@@ -161,7 +163,6 @@ fn spawn_shapes_system(
 
 fn spawn_cameras_system(
     mut commands: Commands,
-    mut main_camera_q: Query<&mut Transform, With<MainCamera>>,
     mut hires_texture: Local<Option<Handle<Image>>>,
     mut lores_texture: Local<Option<Handle<Image>>>,
     mut accumulation_texture: Local<Option<Handle<Image>>>,
@@ -174,8 +175,16 @@ fn spawn_cameras_system(
     lower_left_res: Res<TileMapLowerLeft>,
     mut draw_ev: EventReader<DrawTileEvent>,
     rendering_done_channel: Res<RenderingDoneChannel>,
+    mut rendering_complete_ev: EventWriter<RenderingCompleteEvent>,
 ) {
     for DrawTileEvent(key) in draw_ev.iter() {
+        let tile = tilemap.get(key).unwrap();
+
+        // if tile.shapes.len() == 0 {
+        //     rendering_complete_ev.send_default();
+        //     continue;
+        // }
+
         let accumulation_handle = if let Some(handle) = accumulation_texture.as_ref() {
             // info!("reusing texture");
             (*handle).clone()
@@ -186,6 +195,9 @@ fn spawn_cameras_system(
                 height: grid_y * 32,
                 ..default()
             };
+
+            info!("accumulation texture size {size:?}");
+            // panic!();
 
             // This is the texture that will be rendered to.
             let mut image = Image {
@@ -211,6 +223,41 @@ fn spawn_cameras_system(
             *accumulation_texture = Some(handle.clone());
 
             info!("creating new accumulation texture");
+
+            commands
+                .spawn_bundle(SpriteBundle {
+                    sprite: Sprite {
+                        custom_size: Some(Vec2::new(size.width as f32, size.height as f32)),
+                        anchor: Anchor::BottomLeft,
+                        ..default()
+                    },
+                    texture: handle.clone(),
+                    transform: Transform::from_translation((0.0, 0.0, 1.0).into()),
+                    ..default()
+                })
+                .insert(MAIN_CAMERA_LAYER);
+
+            commands
+                .spawn_bundle(SpriteBundle {
+                    sprite: Sprite {
+                        custom_size: Some(Vec2::new(
+                            size.width as f32 * 1.1,
+                            size.height as f32 * 1.1,
+                        )),
+                        anchor: Anchor::BottomLeft,
+                        color: Color::rgb(1.0, 0.0, 0.0),
+                        ..default()
+                    },
+                    transform: Transform::from_translation(
+                        (-0.05 * size.width as f32, -0.05 * size.height as f32, 0.0).into(),
+                    ),
+                    ..default()
+                })
+                .insert(MAIN_CAMERA_LAYER);
+
+            // println!("x {}, y {}", size.width, size.height);
+
+            // panic!();
 
             handle
         };
@@ -291,7 +338,6 @@ fn spawn_cameras_system(
             handle
         };
 
-        let tile = tilemap.get(key).unwrap();
         let tile_x = tile.extents.min().x - lower_left_res.x;
         let tile_y = tile.extents.min().y - lower_left_res.y;
 
@@ -327,9 +373,6 @@ fn spawn_cameras_system(
         // info!("{:?}", camera.projection);
 
         commands.spawn_bundle(camera).insert(TextureCam);
-
-        let downscaling_pass_layer = RenderLayers::layer(1);
-        let accumulation_pass_layer = RenderLayers::layer(2);
 
         let (mesh_handle, material_handle) =
             if let Some((mesh_handle, material_handle)) = mesh_and_material.as_ref() {
@@ -368,46 +411,44 @@ fn spawn_cameras_system(
             .spawn_bundle(MaterialMesh2dBundle {
                 mesh: mesh_handle.into(),
                 material: material_handle,
-                transform: Transform {
-                    translation: Vec3::new(0.0, 0.0, 1.5),
-                    ..default()
-                },
                 ..default()
             })
-            .insert(downscaling_pass_layer);
+            .insert(DOWNSCALING_PASS_LAYER);
 
-        // The downscaling pass camera.
+        // // The downscaling pass camera.
+        // commands
+        //     .spawn_bundle(Camera2dBundle {
+        //         camera: Camera {
+        //             priority: 1,
+        //             target: RenderTarget::Image(lores_handle.clone()),
+        //             ..default()
+        //         },
+        //         ..Camera2dBundle::default()
+        //     })
+        //     .insert(DOWNSCALING_PASS_LAYER)
+        //     .insert(TextureCam);
+
+        let physical_position = UVec2::new((x / 128) as u32, (y / 128) as u32);
+
+        info!("viewport: {physical_position:?}");
+
+        // The accumulation pass camera.
         commands
             .spawn_bundle(Camera2dBundle {
                 camera: Camera {
-                    // renders after the first main camera which has default value: 0.
-                    priority: 1,
-                    target: RenderTarget::Image(lores_handle.clone()),
-                    ..default()
-                },
-                ..Camera2dBundle::default()
-            })
-            .insert(downscaling_pass_layer)
-            .insert(TextureCam);
-
-        // The downscaling pass camera.
-        commands
-            .spawn_bundle(Camera2dBundle {
-                camera: Camera {
-                    // renders after the first main camera which has default value: 0.
-                    priority: 1,
+                    priority: 2,
                     target: RenderTarget::Image(accumulation_handle.clone()),
                     viewport: Some(Viewport {
                         // this is the same as the calculations we were doing to properly place the small texture's sprite
-                        physical_position: UVec2::new((x / 128) as u32, (y / 128) as u32),
+                        physical_position,
                         physical_size: UVec2::new(32, 32),
-                        depth: Default::default(),
+                        ..default()
                     }),
                     ..default()
                 },
                 ..Camera2dBundle::default()
             })
-            .insert(accumulation_pass_layer)
+            .insert(DOWNSCALING_PASS_LAYER)
             .insert(TextureCam);
 
         // let x = (x / 64) as f32;

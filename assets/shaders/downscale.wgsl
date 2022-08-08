@@ -29,7 +29,9 @@ fn fragment(
     //     1.0
     // );
 
-    var output_color = textureSample(our_texture, our_sampler, uv);
+    // var output_color = textureSample(our_texture, our_sampler, uv);
+
+    var output_color = vec4<f32>(0.0, 1.0, 0.0, 1.0);
 
     return output_color;
 }
