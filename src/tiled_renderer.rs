@@ -1,4 +1,6 @@
 use bevy::{
+    core_pipeline::clear_color::ClearColorConfig,
+    ecs::query::QueryIter,
     prelude::*,
     reflect::TypeUuid,
     render::{
@@ -13,17 +15,29 @@ use bevy::{
     },
     sprite::{Anchor, Material2d, Material2dPlugin, MaterialMesh2dBundle},
 };
-use bevy_prototype_lyon::prelude::*;
+use bevy_prototype_lyon::{
+    prelude::{
+        DrawMode, FillMode, FillOptions, GeometryBuilder, Path as LyonPath, ShapePlugin,
+        StrokeMode, StrokeOptions,
+    },
+    shapes as lyon_shapes,
+};
 use crossbeam_channel::{bounded, Receiver, Sender};
+use rkyv::{archived_root, Deserialize, Infallible};
 
 use crate::{
-    get_grid_shape, DrawTileEvent, FlattenedElems, Layers, LibLayers, MainCamera,
-    RenderingCompleteEvent, TileMap, TileMapLowerLeft,
+    get_grid_shape,
+    shapes::{Layer, Shape, Shapes},
+    DrawTileEvent, LayerColors, Layers, MemMappedFile, RenderingCompleteEvent, TileMap,
+    TileMapLowerLeft,
 };
-use layout21::raw;
+
+use crate::shapes::{ArchivedRect, ArchivedShape};
+
+use std::fs::File;
+use std::io::Write;
 
 use bevy::render::camera::Viewport;
-use std::time::{Duration, Instant};
 
 pub const ALPHA: f32 = 0.1;
 pub const WIDTH: f32 = 10.0;
@@ -76,9 +90,8 @@ pub struct LyonShapeBundle {
 fn spawn_shapes_system(
     mut commands: Commands,
     tilemap: Res<TileMap>,
-    flattened_elems: Res<FlattenedElems>,
-    lib_layers: Res<LibLayers>,
-    layers: Res<Layers>,
+    mut layers: ResMut<Layers>,
+    mut layer_colors: ResMut<LayerColors>,
     mut draw_ev: EventReader<DrawTileEvent>,
     mut existing_lyon_shapes: Query<
         (
@@ -88,34 +101,112 @@ fn spawn_shapes_system(
         ),
         With<LyonShape>,
     >,
+    mmap: Res<MemMappedFile>,
 ) {
     for DrawTileEvent(key) in draw_ev.iter() {
-        let tile = tilemap.get(key).unwrap();
+        let tile = tilemap.get(&(32, 32)).unwrap();
 
-        // let read_lib_layers = lib_layers.read().unwrap();
-        // let mut bundle_vec = Vec::with_capacity(tile.shapes.len());
+        let archived_shapes = unsafe { archived_root::<Shapes>(&(mmap.0)) };
+
+        // info!("{:?}", archived_shapes.shapes[0]);
+
+        // // panic!();
 
         info!("Num shapes in this tile: {}", tile.shapes.len());
 
+        // let xmin = 0;
+        // let xmax = 10_000;
+        // let ymin = 0;
+        // let ymax = 10_000;
+
+        // let color = Color::CYAN;
+
+        // let lyon_poly = lyon_shapes::Polygon {
+        //     points: vec![
+        //         (xmin as f32, ymin as f32).into(),
+        //         (xmax as f32, ymin as f32).into(),
+        //         (xmax as f32, ymax as f32).into(),
+        //         (xmin as f32, ymax as f32).into(),
+        //     ],
+        //     closed: true,
+        // };
+
+        // let transform = Transform::from_translation(Vec3::new(0.0, 0.0, 0.0 as f32));
+
+        // let lyon_shape = GeometryBuilder::build_as(
+        //     &lyon_poly,
+        //     DrawMode::Outlined {
+        //         fill_mode: FillMode {
+        //             color: *color.clone().set_a(ALPHA),
+        //             options: FillOptions::default(),
+        //         },
+        //         outline_mode: StrokeMode {
+        //             color: color,
+        //             options: StrokeOptions::default().with_line_width(WIDTH),
+        //         },
+        //     },
+        //     transform,
+        // );
+
+        // let bundle = LyonShapeBundle {
+        //     lyon: lyon_shape,
+        //     marker: LyonShape,
+        // };
+
+        // let mut existing_shapes_iter = existing_lyon_shapes.iter_mut();
+
+        // if let Some((mut existing_path, mut existing_transform, mut vis)) =
+        //     existing_shapes_iter.next()
+        // {
+        //     *existing_path = bundle.lyon.path;
+        //     *existing_transform = bundle.lyon.transform;
+        //     vis.is_visible = true;
+        // } else {
+        //     commands.spawn_bundle(bundle);
+        // }
+
         let mut existing_shapes_iter = existing_lyon_shapes.iter_mut();
+        info!("{:?}", tile.shapes);
+        let mut f = File::options()
+            .create(true)
+            .write(true)
+            .open("dbg")
+            .unwrap();
+
+        f.write(format!("{:#?}", tile.shapes).as_bytes()).unwrap();
+        let tile_shapes = tile
+            .shapes
+            .iter()
+            .map(|&idx| {
+                let s: Shape = archived_shapes.shapes[idx]
+                    .deserialize(&mut Infallible)
+                    .unwrap();
+                (idx, s)
+            })
+            .collect::<Vec<_>>();
+
+        for l in tile_shapes {
+            f.write(format!("{l:?}\n",).as_bytes()).unwrap();
+        }
+
+        panic!();
         for idx in tile.shapes.iter() {
-            let el = &(**flattened_elems)[*idx];
+            let s = &archived_shapes.shapes[*idx];
 
-            let layer = lib_layers
-                .get(el.layer)
-                .expect("This Element's LayerKey does not exist in this Library's Layers")
-                .layernum as u8;
+            info!("{s:?}");
 
-            let color = layers.get(&layer).unwrap();
+            let layer = s.layer();
 
-            if let raw::Shape::Rect(r) = &el.inner {
-                let raw::Rect { p0, p1 } = r;
+            let color = layers.entry(layer).or_insert(layer_colors.get_color());
+
+            if let ArchivedShape::Rect(r) = s {
+                let ArchivedRect { p0, p1, .. } = r;
                 let xmin = p0.x / 4;
                 let ymin = p0.y / 4;
                 let xmax = p1.x / 4;
                 let ymax = p1.y / 4;
 
-                let lyon_poly = shapes::Polygon {
+                let lyon_poly = lyon_shapes::Polygon {
                     points: vec![
                         (xmin as f32, ymin as f32).into(),
                         (xmax as f32, ymin as f32).into(),
@@ -158,6 +249,105 @@ fn spawn_shapes_system(
                 }
             }
         }
+
+        // let mut existing_shapes_iter = existing_lyon_shapes.iter_mut();
+        // for idx in tile.shapes.iter() {
+        //     let s = &archived_shapes.shapes[*idx];
+
+        //     let layer = s.layer();
+
+        //     let color = layers.entry(layer).or_insert(layer_colors.get_color());
+
+        //     match s {
+        //         ArchivedShape::Rect(r) => {
+        //             let ArchivedRect { p0, p1, .. } = r;
+        //             let xmin = p0.x / 4;
+        //             let ymin = p0.y / 4;
+        //             let xmax = p1.x / 4;
+        //             let ymax = p1.y / 4;
+
+        //             spawn_shape_helper(
+        //                 vec![
+        //                     (xmin as f32, ymin as f32).into(),
+        //                     (xmax as f32, ymin as f32).into(),
+        //                     (xmax as f32, ymax as f32).into(),
+        //                     (xmin as f32, ymax as f32).into(),
+        //                 ],
+        //                 color.clone(),
+        //                 layer,
+        //                 &mut existing_shapes_iter,
+        //                 &mut commands,
+        //             )
+        //         }
+        //         ArchivedShape::Poly(p) => spawn_shape_helper(
+        //             p.points
+        //                 .iter()
+        //                 .map(|p| Vec2::new((p.x / 4) as f32, (p.y / 4) as f32))
+        //                 .collect(),
+        //             color.clone(),
+        //             layer,
+        //             &mut existing_shapes_iter,
+        //             &mut commands,
+        //         ),
+        //         ArchivedShape::Path(p) => spawn_shape_helper(
+        //             p.points
+        //                 .iter()
+        //                 .map(|p| Vec2::new((p.x / 4) as f32, (p.y / 4) as f32))
+        //                 .collect(),
+        //             color.clone(),
+        //             layer,
+        //             &mut existing_shapes_iter,
+        //             &mut commands,
+        //         ),
+        //     }
+        // }
+    }
+}
+
+fn spawn_shape_helper(
+    points: Vec<Vec2>,
+    color: Color,
+    layer: u8,
+    existing_shapes_iter: &mut QueryIter<
+        (&mut LyonPath, &mut Transform, &mut Visibility),
+        With<LyonShape>,
+    >,
+    commands: &mut Commands,
+) {
+    let lyon_poly = lyon_shapes::Polygon {
+        points,
+        closed: true,
+    };
+
+    let transform = Transform::from_translation(Vec3::new(0.0, 0.0, layer as f32));
+
+    let lyon_shape = GeometryBuilder::build_as(
+        &lyon_poly,
+        DrawMode::Outlined {
+            fill_mode: FillMode {
+                color: *color.clone().set_a(ALPHA),
+                options: FillOptions::default(),
+            },
+            outline_mode: StrokeMode {
+                color: color,
+                options: StrokeOptions::default().with_line_width(WIDTH),
+            },
+        },
+        transform,
+    );
+
+    let bundle = LyonShapeBundle {
+        lyon: lyon_shape,
+        marker: LyonShape,
+    };
+
+    if let Some((mut existing_path, mut existing_transform, mut vis)) = existing_shapes_iter.next()
+    {
+        *existing_path = bundle.lyon.path;
+        *existing_transform = bundle.lyon.transform;
+        vis.is_visible = true;
+    } else {
+        commands.spawn_bundle(bundle);
     }
 }
 
@@ -180,7 +370,14 @@ fn spawn_cameras_system(
     for DrawTileEvent(key) in draw_ev.iter() {
         let tile = tilemap.get(key).unwrap();
 
+        let downscaled_tile_extent = 64;
+
         // if tile.shapes.len() == 0 {
+        //     rendering_complete_ev.send_default();
+        //     continue;
+        // }
+
+        // if *key == (100, 160) {
         //     rendering_complete_ev.send_default();
         //     continue;
         // }
@@ -191,8 +388,8 @@ fn spawn_cameras_system(
         } else {
             let (grid_x, grid_y) = get_grid_shape(&tilemap);
             let size = Extent3d {
-                width: grid_x * 32,
-                height: grid_y * 32,
+                width: grid_x * downscaled_tile_extent,
+                height: grid_y * downscaled_tile_extent,
                 ..default()
             };
 
@@ -305,8 +502,8 @@ fn spawn_cameras_system(
             (*handle).clone()
         } else {
             let size = Extent3d {
-                width: 32,
-                height: 32,
+                width: downscaled_tile_extent,
+                height: downscaled_tile_extent,
                 ..default()
             };
 
@@ -338,8 +535,8 @@ fn spawn_cameras_system(
             handle
         };
 
-        let tile_x = tile.extents.min().x - lower_left_res.x;
-        let tile_y = tile.extents.min().y - lower_left_res.y;
+        let tile_x = tile.extents.min().x as i32 - lower_left_res.x;
+        let tile_y = tile.extents.min().y as i32 - lower_left_res.y;
 
         // info!("{tile_x}");
         // info!("{tile_y}");
@@ -428,7 +625,10 @@ fn spawn_cameras_system(
         //     .insert(DOWNSCALING_PASS_LAYER)
         //     .insert(TextureCam);
 
-        let physical_position = UVec2::new((x / 128) as u32, (y / 128) as u32);
+        let physical_position = UVec2::new(
+            (x / downscaled_tile_extent as i32) as u32,
+            (y / downscaled_tile_extent as i32) as u32,
+        );
 
         info!("viewport: {physical_position:?}");
 
@@ -441,10 +641,13 @@ fn spawn_cameras_system(
                     viewport: Some(Viewport {
                         // this is the same as the calculations we were doing to properly place the small texture's sprite
                         physical_position,
-                        physical_size: UVec2::new(32, 32),
+                        physical_size: UVec2::new(downscaled_tile_extent, downscaled_tile_extent),
                         ..default()
                     }),
                     ..default()
+                },
+                camera_2d: Camera2d {
+                    clear_color: ClearColorConfig::None,
                 },
                 ..Camera2dBundle::default()
             })

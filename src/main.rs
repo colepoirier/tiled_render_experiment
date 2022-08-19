@@ -1,25 +1,32 @@
+use bbox::BoundingBox;
 use bevy::{
     input::mouse::{MouseScrollUnit, MouseWheel},
     prelude::*,
-    render::{
-        camera::{Projection, WindowOrigin},
-        renderer::RenderDevice,
-    },
-    tasks::{AsyncComputeTaskPool, Task},
+    render::{camera::WindowOrigin, renderer::RenderDevice},
     utils::hashbrown::HashMap,
 };
 
+use rkyv::{archived_root, Deserialize, Infallible};
+
+use memmap2::Mmap;
 use std::ops::Range;
+use std::{fs::File, time::Instant};
 
 use csv::Writer;
-use futures_lite::future;
 use geo::Intersects;
 use itertools::Itertools;
-use layout21::raw::{self, proto::ProtoImporter, BoundBox, BoundBoxTrait, Library};
 
-pub mod tiled_renderer;
+mod bbox;
+mod shapes;
+mod tiled_renderer;
+
+use bbox::CalculateBoundingBox;
+
+use shapes::{ArchivedRect, ArchivedShape, Shapes};
 
 use tiled_renderer::{TiledRendererPlugin, MAIN_CAMERA_LAYER};
+
+use crate::shapes::Point;
 
 pub type GeoRect = geo::Rect<i64>;
 pub type GeoPolygon = geo::Polygon<i64>;
@@ -30,51 +37,23 @@ pub enum GeoShapeEnum {
     Polygon(GeoPolygon),
 }
 
-#[derive(Default)]
+#[derive(Debug)]
 pub struct Tile {
     pub extents: GeoRect,
     pub shapes: Vec<usize>,
 }
 
-impl std::fmt::Debug for Tile {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(
-            f,
-            "Tile {{ {:?}, num_shapes: {} }}",
-            self.extents,
-            self.shapes.len()
-        )
-    }
-}
-
-#[derive(Debug, Default, Deref, DerefMut)]
+#[derive(Debug, Deref, DerefMut)]
 pub struct TileMap(HashMap<(u32, u32), Tile>);
 
 #[derive(Debug, Default)]
 pub struct TileMapLowerLeft {
-    x: i64,
-    y: i64,
+    x: i32,
+    y: i32,
 }
-
-#[derive(Debug, Default, Deref, DerefMut)]
-pub struct FlattenedElems(Vec<raw::Element>);
-
-#[derive(Debug, Default, Clone, Copy)]
-pub struct OpenVlsirLibCompleteEvent;
-
-#[derive(Debug, Default)]
-struct VlsirLib {
-    pub lib: Option<Library>,
-}
-
-#[derive(Debug, Component, Deref, DerefMut)]
-struct LibraryWrapper(Task<Library>);
 
 #[derive(Debug, Default, Clone, Deref, DerefMut)]
 pub struct Layers(HashMap<u8, Color>);
-
-#[derive(Debug, Default, Clone, Deref, DerefMut)]
-pub struct LibLayers(raw::Layers);
 
 #[derive(Debug)]
 pub struct LayerColors {
@@ -116,11 +95,14 @@ struct RenderingCompleteEvent;
 #[derive(Debug, Component)]
 pub struct MainCamera;
 
+#[derive(Debug, Deref)]
+pub struct MemMappedFile(Mmap);
+
 fn main() {
     App::new()
         .insert_resource(WindowDescriptor {
-            width: 1920.0,
-            height: 1080.0,
+            width: 1920.0 / 4.0,
+            height: 1080.0 / 4.0,
             present_mode: bevy::window::PresentMode::Immediate,
             ..default()
         })
@@ -128,21 +110,21 @@ fn main() {
         .add_plugin(PanCamPlugin)
         .add_plugin(TiledRendererPlugin)
         .init_resource::<LayerColors>()
-        .init_resource::<VlsirLib>()
-        .init_resource::<FlattenedElems>()
-        .init_resource::<TileMap>()
+        .insert_resource(TileMap(HashMap::<(u32, u32), Tile>::new()))
+        .insert_resource({
+            let f = File::open("test64x64.rkyv").unwrap();
+
+            let mmap = unsafe { Mmap::map(&f).unwrap() };
+            MemMappedFile(mmap)
+        })
         .init_resource::<TileMapLowerLeft>()
         .init_resource::<Layers>()
-        .init_resource::<LibLayers>()
         .init_resource::<TileIndexIter>()
-        .add_event::<OpenVlsirLibCompleteEvent>()
         .add_event::<DrawTileEvent>()
         .add_event::<TileIndexIter>()
         .add_event::<RenderingCompleteEvent>()
         .init_resource::<Msaa>()
         .add_startup_system(setup)
-        .add_system(spawn_vlsir_open_task_sytem)
-        .add_system(handle_vlsir_open_task_system)
         .add_system(load_lib_system)
         .add_system(iter_tile_index_system)
         .add_system(camera_changed_system)
@@ -183,125 +165,76 @@ fn camera_changed_system(
     }
 }
 
-fn spawn_vlsir_open_task_sytem(mut commands: Commands, mut already_done: Local<bool>) {
-    if !*already_done {
-        let thread_pool = AsyncComputeTaskPool::get();
-
-        let task: Task<Library> = thread_pool.spawn(async move {
-            let plib = raw::proto::proto::open(
-                "/home/colepoirier/Dropbox/rust_2020_onwards/doug/doug/libs/oscibear.proto",
-            )
-            .unwrap();
-            ProtoImporter::import(&plib, None).unwrap()
-        });
-        let task = LibraryWrapper(task);
-        commands.spawn().insert(task);
-        *already_done = true;
-    }
-}
-
-fn handle_vlsir_open_task_system(
-    mut commands: Commands,
-    mut lib: ResMut<VlsirLib>,
-    mut vlsir_open_task_q: Query<(Entity, &mut LibraryWrapper)>,
-    mut vlsir_open_lib_complete_event_writer: EventWriter<OpenVlsirLibCompleteEvent>,
-) {
-    for (entity, mut task) in vlsir_open_task_q.iter_mut() {
-        if let Some(vlsir_lib) = future::block_on(future::poll_once(&mut **task)) {
-            lib.lib = Some(vlsir_lib);
-            vlsir_open_lib_complete_event_writer.send(OpenVlsirLibCompleteEvent);
-            commands.entity(entity).despawn();
-        }
-    }
-}
-
 fn load_lib_system(
-    mut vlsir_open_lib_complete_event_reader: EventReader<OpenVlsirLibCompleteEvent>,
-    vlsir_lib: Res<VlsirLib>,
-    mut layer_colors: ResMut<LayerColors>,
-    mut layers: ResMut<Layers>,
-    mut lib_layers: ResMut<LibLayers>,
     render_device: Res<RenderDevice>,
     mut tilemap: ResMut<TileMap>,
     mut tile_index_iter: ResMut<TileIndexIter>,
-    mut flattened_elems_res: ResMut<FlattenedElems>,
     mut min_offset_res: ResMut<TileMapLowerLeft>,
     mut ev: EventWriter<DrawTileEvent>,
+    mut already_ran: Local<bool>,
+    mmap: Res<MemMappedFile>,
 ) {
-    let texture_dim = render_device.limits().max_texture_dimension_2d;
+    if !*already_ran {
+        let extents = render_device.limits().max_texture_dimension_2d;
 
-    for _ in vlsir_open_lib_complete_event_reader.iter() {
-        let lib = vlsir_lib.lib.as_ref().unwrap();
+        let archived_shapes = unsafe { archived_root::<Shapes>(&mmap) };
 
-        {
-            let lib_layers = &lib.layers.read().unwrap().slots;
+        let num_shapes = archived_shapes.shapes.len();
 
-            for raw::Layer {
-                layernum, name: _, ..
-            } in lib_layers.values()
-            {
-                let num = *layernum as u8;
-                if let Some(_) = layers.insert(num, layer_colors.get_color()) {
-                    panic!(
-                        "Library layers corrupted multiple definitions for layer number {}",
-                        num
-                    );
-                }
-            }
-        }
+        info!("num elems including instances: {}", num_shapes);
 
-        *lib_layers = LibLayers(lib.layers.read().unwrap().clone());
+        let bbox: BoundingBox = archived_shapes.bbox.deserialize(&mut Infallible).unwrap();
 
-        let cell_ptr = lib.cells.iter().last().unwrap();
+        info!("{bbox:?}");
 
-        let cell = cell_ptr.read().unwrap();
+        let boundary_min_x = bbox.min().x;
+        let boundary_min_y = bbox.min().y;
+        let boundary_max_x = bbox.max().x;
+        let boundary_max_y = bbox.max().y;
 
-        let flattened_elems = cell.layout.as_ref().unwrap().flatten().unwrap();
+        let shapes = &archived_shapes.shapes;
 
-        info!("num elems including instances: {}", flattened_elems.len());
-
-        let mut bbox = BoundBox::empty();
-        for elem in flattened_elems.iter() {
-            bbox = elem.inner.union(&bbox);
-        }
-
-        assert!(!bbox.is_empty(), "bbox must be valid!");
         *min_offset_res = TileMapLowerLeft {
-            x: bbox.p0.x as i64,
-            y: bbox.p0.y as i64,
+            x: bbox.min().x,
+            y: bbox.min().y,
         };
 
-        info!("flattened bbox is {bbox:?}");
+        let tilemap_shift = Point {
+            x: -bbox.min().x,
+            y: -bbox.min().y,
+        };
 
-        let dx = (bbox.p1.x - bbox.p0.x) as u32;
-        let dy = (bbox.p1.y - bbox.p0.y) as u32;
-
-        let num_x_tiles = (dx as f32 / texture_dim as f32).ceil() as u32;
-        let num_y_tiles = (dy as f32 / texture_dim as f32).ceil() as u32;
-
-        let mut x = bbox.p0.x as i64;
-        let mut y = bbox.p0.y as i64;
-
-        let mut tilemap_shift = raw::Point::default();
-
-        if x < 0 {
-            tilemap_shift.x = -x as isize;
+        let tilemap_max_coords = Point {
+            x: bbox.max().x - 1,
+            y: bbox.max().y - 1,
         }
+        .shift(&tilemap_shift);
 
-        if y < 0 {
-            tilemap_shift.y = -y as isize;
-        }
+        info!("{tilemap_max_coords:?}");
+
+        info!("tilemap_shift {tilemap_shift:?}");
+
+        let dx = u32::try_from(bbox.max().x - bbox.min().x).unwrap();
+        let dy = u32::try_from(bbox.max().y - bbox.min().y).unwrap();
+
+        let num_x_tiles = (dx as f32 / extents as f32).ceil() as u32;
+        let num_y_tiles = (dy as f32 / extents as f32).ceil() as u32;
+
+        info!("dx {dx} dy {dy} num_x_tiles {num_x_tiles} num_y_tiles {num_y_tiles}");
+
+        let mut x = bbox.min().x;
+        let mut y = bbox.min().y;
 
         for iy in 0..num_y_tiles {
             let ymin = y;
-            y += texture_dim as i64;
+            y += extents as i32;
             let ymax = y;
             for ix in 0..num_x_tiles {
                 let xmin = x;
-                x += texture_dim as i64;
+                x += extents as i32;
                 let xmax = x;
 
-                let extents = GeoRect::new((xmin, ymin), (xmax, ymax));
+                let extents = GeoRect::new((xmin as i64, ymin as i64), (xmax as i64, ymax as i64));
 
                 tilemap.insert(
                     (ix, iy),
@@ -312,26 +245,125 @@ fn load_lib_system(
                 );
             }
 
-            x = bbox.p0.x as i64;
+            x = bbox.min().x;
         }
 
         let mut shape_count = 0;
 
-        info!("{bbox:?}, dx: {dx}, dy: {dy}, tiles: [{num_x_tiles}, {num_y_tiles}]");
+        let t = Instant::now();
 
-        let t = std::time::Instant::now();
+        for (idx, s) in shapes.iter().enumerate() {
+            // info!("{s:?}");
 
-        import_cell_shapes(
-            tilemap_shift,
-            texture_dim,
-            &mut tilemap,
-            &flattened_elems,
-            &mut shape_count,
-        );
+            let bbox = s.bbox();
+
+            // info!("pre-shift: {bbox:?}");
+
+            let bbox = s.bbox().shift(&tilemap_shift);
+
+            // info!("post-shift: {bbox:?}");
+
+            // let min_tile_x = (bbox.min().x / extents as i32).min(0) as u32;
+            // let max_tile_x = (bbox.max().x / extents as i32).max(num_x_tiles as i32) as u32;
+            // let min_tile_y = (bbox.min().y / extents as i32).min(0) as u32;
+            // let max_tile_y = (bbox.max().y / extents as i32).max(num_y_tiles as i32) as u32;
+
+            // info!("boundary_min_x: {boundary_min_x}, boundary_max_x: {boundary_max_x}, boundary_min_y: {boundary_min_y}, boundary_max_y: {boundary_max_y}");
+
+            let min_tile_x = bbox.min().x.clamp(0, tilemap_max_coords.x) as u32 / extents;
+            let min_tile_y = bbox.min().y.clamp(0, tilemap_max_coords.y) as u32 / extents;
+            let max_tile_x = bbox.max().x.clamp(0, tilemap_max_coords.x) as u32 / extents;
+            let max_tile_y = bbox.max().y.clamp(0, tilemap_max_coords.y) as u32 / extents;
+
+            // info!("min_tile_x: {min_tile_x}, max_tile_x: {max_tile_x}, min_tile_y: {min_tile_y}, max_tile_y: {max_tile_y}");
+
+            // panic!();
+
+            let geo_shape = match s {
+                ArchivedShape::Rect(r) => {
+                    // info!("{r:?}");
+                    let ArchivedRect { p0, p1, .. } = r;
+
+                    let xmin = p0.x as i64;
+                    let ymin = p0.y as i64;
+                    let xmax = p1.x as i64;
+                    let ymax = p1.y as i64;
+
+                    let rect = GeoRect::new((xmin, ymin), (xmax, ymax));
+
+                    let geo_shape = GeoShapeEnum::Rect(rect);
+
+                    geo_shape
+                }
+                ArchivedShape::Poly(p) => {
+                    // info!("{p:?}");
+                    let poly = GeoPolygon::new(
+                        p.points.iter().map(|p| (p.x as i64, p.y as i64)).collect(),
+                        vec![],
+                    );
+
+                    GeoShapeEnum::Polygon(poly)
+                }
+                ArchivedShape::Path(p) => {
+                    // info!("{p:?}");
+
+                    let p = p.as_poly();
+
+                    let poly = GeoPolygon::new(
+                        p.into_iter().map(|p| (p.x as i64, p.y as i64)).collect(),
+                        vec![],
+                    );
+
+                    GeoShapeEnum::Polygon(poly)
+                }
+            };
+
+            // info!("min_tile_x: {min_tile_x}, max_tile_x: {max_tile_x}, min_tile_y: {min_tile_y}, max_tile_y: {max_tile_y}");
+            // info!("{geo_shape:?}");
+            // info!("{:?}", tilemap.get(&(min_tile_x, min_tile_y)));
+
+            // panic!();
+
+            // std::thread::sleep(std::time::Duration::from_secs(5));
+
+            for x in min_tile_x..(max_tile_x + 1) {
+                for y in min_tile_y..(max_tile_y + 1) {
+                    // info!("tile x {x}, y {y}");
+                    let Tile { extents, shapes } = tilemap.get_mut(&(x, y)).unwrap();
+
+                    let extents = &*extents;
+
+                    // info!("extents {extents:?}");
+
+                    match &geo_shape {
+                        GeoShapeEnum::Rect(r) => {
+                            // info!("extents {extents:?}");
+                            // info!("rect:   {r:?}");
+                            if r.intersects(extents) {
+                                shapes.push(idx);
+                                // info!("pushing idx [{idx}] to tile {extents:?}");
+                            }
+                        }
+                        GeoShapeEnum::Polygon(p) => {
+                            if p.intersects(extents) {
+                                shapes.push(idx);
+                                // info!("pushing idx [{idx}] to tile {extents:?}");
+                            }
+                        }
+                    }
+                }
+            }
+
+            // info!("shape_count: {shape_count}");
+
+            shape_count += 1;
+
+            if shape_count % 1_000_000 == 0 {
+                info!("shapes processed: {shape_count}");
+            }
+        }
 
         info!("DONE {shape_count} shapes in {:?}!", t.elapsed());
-
-        *flattened_elems_res = FlattenedElems(flattened_elems);
 
         stats(&tilemap);
 
@@ -343,7 +375,11 @@ fn load_lib_system(
 
         *tile_index_iter = TileIndexIter(Some(index_iter));
 
+        // panic!();
+
         ev.send(DrawTileEvent((x, y)));
+
+        *already_ran = true;
     }
 }
 
@@ -364,6 +400,27 @@ fn iter_tile_index_system(
             }
         }
     }
+
+    // for _ in rendering_complete_ev.iter() {
+    //     if tile_index_iter.is_some() {
+    //         let idx_iter = (**tile_index_iter).as_mut().unwrap();
+
+    //         loop {
+    //             if let Some((y, x)) = idx_iter.next() {
+    //                 if tilemap.get(&(x, y)).unwrap().shapes.len() != 0 {
+    //                     let event = DrawTileEvent((x, y));
+    //                     info!("Sending {event:?}");
+    //                     draw_tile_ev.send(event);
+    //                     break;
+    //                 } else {
+    //                     info!("Tile ({x}, {y}) is empty, not sending DrawTileEvent");
+    //                 }
+    //             } else {
+    //                 break;
+    //             }
+    //         }
+    //     }
+    // }
 }
 
 fn get_grid_shape(grid: &TileMap) -> (u32, u32) {
@@ -426,129 +483,6 @@ fn stats(grid: &TileMap) {
         num_rects_incl_duplicates as f32 / num_occupied_bins as f32
     );
     info!("min: {min}, max: {max}, avg_spob: {avg_spob}");
-}
-
-pub fn import_cell_shapes(
-    tilemap_shift: raw::Point,
-    texture_dim: u32,
-    tilemap: &mut TileMap,
-    elems: &Vec<raw::Element>,
-    shape_count: &mut u64,
-) {
-    for (idx, raw::Element { inner, .. }) in elems.iter().enumerate() {
-        let mut bbox = inner.bbox();
-
-        if !bbox.is_empty() {
-            bbox.p0 = bbox.p0.shift(&tilemap_shift);
-            bbox.p1 = bbox.p1.shift(&tilemap_shift);
-
-            let BoundBox { p0, p1 } = bbox;
-
-            let min_tile_x = p0.x as u32 / texture_dim;
-            let min_tile_y = p0.y as u32 / texture_dim;
-            let max_tile_x = p1.x as u32 / texture_dim;
-            let max_tile_y = p1.y as u32 / texture_dim;
-
-            let geo_shape = match inner {
-                raw::Shape::Rect(r) => {
-                    let raw::Rect { p0, p1 } = r;
-
-                    let xmin = p0.x as i64;
-                    let ymin = p0.y as i64;
-                    let xmax = p1.x as i64;
-                    let ymax = p1.y as i64;
-
-                    let rect = GeoRect::new((xmin, ymin), (xmax, ymax));
-
-                    let geo_shape = GeoShapeEnum::Rect(rect);
-
-                    geo_shape
-                }
-                raw::Shape::Polygon(p) => {
-                    let poly = GeoPolygon::new(
-                        p.points.iter().map(|p| (p.x as i64, p.y as i64)).collect(),
-                        vec![],
-                    );
-
-                    GeoShapeEnum::Polygon(poly)
-                }
-                raw::Shape::Path(p) => {
-                    let num_points = p.points.len();
-                    let mut forward_poly_points = Vec::with_capacity(num_points);
-                    let mut backward_poly_points = Vec::with_capacity(num_points);
-                    assert_eq!(
-                        p.width % 2,
-                        0,
-                        "width must be even for our code's assumptions to hold!"
-                    );
-                    let half_width = (p.width / 2) as isize; // assuming that widths are even!
-                    for ix in 0..num_points {
-                        let p0 = p.points[ix];
-                        let p1 = p.points[(ix + 1) % num_points];
-                        // let corrected_point = p0.shift(offset);
-                        if p0.x == p1.x {
-                            // horizontal
-                            forward_poly_points.push(raw::Point {
-                                x: p0.x,
-                                y: p0.y - half_width,
-                            });
-                            backward_poly_points.push(raw::Point {
-                                x: p0.x,
-                                y: p0.y + half_width,
-                            });
-                        } else {
-                            // vertical
-                            forward_poly_points.push(raw::Point {
-                                x: p0.x + half_width,
-                                y: p0.y,
-                            });
-                            backward_poly_points.push(raw::Point {
-                                x: p0.x - half_width,
-                                y: p0.y,
-                            });
-                        }
-                    }
-                    let poly = GeoPolygon::new(
-                        forward_poly_points
-                            .into_iter()
-                            .chain(backward_poly_points.into_iter().rev())
-                            .map(|p| (p.x as i64, p.y as i64))
-                            .collect(),
-                        vec![],
-                    );
-
-                    GeoShapeEnum::Polygon(poly)
-                }
-            };
-
-            for x in min_tile_x..(max_tile_x + 1) {
-                for y in min_tile_y..(max_tile_y + 1) {
-                    let Tile { extents, shapes } = tilemap.get_mut(&(x, y)).unwrap();
-
-                    let extents = &*extents;
-
-                    match &geo_shape {
-                        GeoShapeEnum::Rect(r) => {
-                            if r.intersects(extents) {
-                                shapes.push(idx);
-                            }
-                        }
-                        GeoShapeEnum::Polygon(p) => {
-                            if p.intersects(extents) {
-                                shapes.push(idx);
-                            }
-                        }
-                    }
-                }
-            }
-        }
-
-        *shape_count += 1;
-
-        if *shape_count % 1_000_000 == 0 {
-            info!("shapes processed: {shape_count}");
-        }
-    }
 }
 
 #[derive(Default)]
