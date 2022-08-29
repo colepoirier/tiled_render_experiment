@@ -116,7 +116,12 @@ fn create_tilemap_system(
             x: texture_dim as i32 * 64,
             y: texture_dim as i32 * 64,
         };
-        let mut flattened_elems = generate_random_elements(num_elements, min_p, max_p);
+        let mut flattened_elems = vec![Rect {
+            p0: min_p,
+            p1: max_p,
+            layer: 0,
+        }];
+        //generate_random_elements(num_elements, min_p, max_p);
 
         flattened_elems.sort_by(|a, b| a.p1.x.cmp(&b.p1.x));
 
@@ -158,8 +163,8 @@ fn create_tilemap_system(
 
         info!("(dx {dx}, dy {dy})");
 
-        let num_x_tiles = (dx as f32 / texture_dim as f32).ceil() as u32;
-        let num_y_tiles = (dy as f32 / texture_dim as f32).ceil() as u32;
+        let num_x_tiles = ((dx as f32 / texture_dim as f32) + 0.00001).ceil() as u32;
+        let num_y_tiles = ((dy as f32 / texture_dim as f32) + 0.00001).ceil() as u32;
 
         info!("num_x_tiles: {num_x_tiles}, num_y_tiles: {num_y_tiles}");
 
@@ -221,7 +226,7 @@ fn create_tilemap_system(
 
             for x in min_tile_x..=max_tile_x {
                 for y in min_tile_y..=max_tile_y {
-                    // info!("x {x}, y {y}");
+                    info!("x {x}, y {y}");
                     let Tile { extents, shapes } = tilemap.get_mut(&(x, y)).unwrap();
 
                     let extents = &*extents;

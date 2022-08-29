@@ -83,6 +83,8 @@ fn spawn_shapes_system(
 
         info!("Num shapes in this tile: {}", tile.shapes.len());
 
+        let extents = tile.extents;
+
         // let mut set = std::collections::HashSet::<&Element>::with_capacity(tile.shapes.len());
 
         // let mut num_duplicates = 0;
