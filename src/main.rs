@@ -116,12 +116,7 @@ fn create_tilemap_system(
             x: texture_dim as i32 * 64,
             y: texture_dim as i32 * 64,
         };
-        let mut flattened_elems = vec![Rect {
-            p0: min_p,
-            p1: max_p,
-            layer: 0,
-        }];
-        //generate_random_elements(num_elements, min_p, max_p);
+        let mut flattened_elems = generate_random_elements(num_elements, min_p, max_p);
 
         flattened_elems.sort_by(|a, b| a.p1.x.cmp(&b.p1.x));
 
