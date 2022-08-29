@@ -20,13 +20,11 @@ use std::time::Duration;
 use crate::{
     get_grid_shape,
     types::{
-        DrawTileEvent, FlattenedElems, Layers, LibLayers, LyonShape, LyonShapeBundle,
-        RenderingCompleteEvent, RenderingDoneChannel, TextureCam, TileMap, TileMapLowerLeft,
-        ACCUMULATION_CAMERA_PRIORITY, ALPHA, DOWNSCALING_PASS_LAYER, MAIN_CAMERA_LAYER, WIDTH,
+        DrawTileEvent, FlattenedElems, LyonShape, LyonShapeBundle, Rect, RenderingCompleteEvent,
+        RenderingDoneChannel, TextureCam, Tilemap, TilemapLowerLeft, ACCUMULATION_CAMERA_PRIORITY,
+        ALPHA, DOWNSCALING_PASS_LAYER, MAIN_CAMERA_LAYER, WIDTH,
     },
 };
-
-use layout21::raw::{self, Element};
 
 pub struct TiledRendererPlugin;
 
@@ -68,10 +66,8 @@ impl Plugin for TiledRendererPlugin {
 
 fn spawn_shapes_system(
     mut commands: Commands,
-    tilemap: Res<TileMap>,
+    tilemap: Res<Tilemap>,
     flattened_elems: Res<FlattenedElems>,
-    lib_layers: Res<LibLayers>,
-    layers: Res<Layers>,
     mut draw_ev: EventReader<DrawTileEvent>,
     mut existing_lyon_shapes: Query<
         (
@@ -87,9 +83,9 @@ fn spawn_shapes_system(
 
         info!("Num shapes in this tile: {}", tile.shapes.len());
 
-        let mut set = std::collections::HashSet::<&Element>::with_capacity(tile.shapes.len());
+        // let mut set = std::collections::HashSet::<&Element>::with_capacity(tile.shapes.len());
 
-        let mut num_duplicates = 0;
+        // let mut num_duplicates = 0;
 
         // for idx in tile.shapes.iter() {
         //     let e = &(**flattened_elems)[*idx];
@@ -100,68 +96,69 @@ fn spawn_shapes_system(
         //
         // info!("Num duplicates: {num_duplicates}");
 
+        let mut num_pixels = 0;
+
         let mut existing_shapes_iter = existing_lyon_shapes.iter_mut();
         for idx in tile.shapes.iter() {
-            let el = &(**flattened_elems)[*idx];
+            let r = &(**flattened_elems)[*idx];
 
-            // let layer = lib_layers
-            //     .get(el.layer)
-            //     .expect("This Element's LayerKey does not exist in this Library's Layers")
-            //     .layernum as u8;
+            let color = *Color::WHITE.clone().set_a(ALPHA);
 
-            // let color = layers.get(&layer).unwrap();
-            let color = *(Color::WHITE.set_a(ALPHA));
+            let Rect { p0, p1, layer } = r;
+            let xmin = p0.x / 4;
+            let ymin = p0.y / 4;
+            let xmax = p1.x / 4;
+            let ymax = p1.y / 4;
 
-            if let raw::Shape::Rect(r) = &el.inner {
-                let raw::Rect { p0, p1 } = r;
-                let xmin = p0.x / 4;
-                let ymin = p0.y / 4;
-                let xmax = p1.x / 4;
-                let ymax = p1.y / 4;
+            num_pixels += (xmax - xmin) as u64 * (ymax - ymin) as u64;
 
-                let lyon_poly = shapes::Polygon {
-                    points: vec![
-                        (xmin as f32, ymin as f32).into(),
-                        (xmax as f32, ymin as f32).into(),
-                        (xmax as f32, ymax as f32).into(),
-                        (xmin as f32, ymax as f32).into(),
-                    ],
-                    closed: true,
-                };
+            let lyon_poly = shapes::Polygon {
+                points: vec![
+                    (xmin as f32, ymin as f32).into(),
+                    (xmax as f32, ymin as f32).into(),
+                    (xmax as f32, ymax as f32).into(),
+                    (xmin as f32, ymax as f32).into(),
+                ],
+                closed: true,
+            };
 
-                let transform = Transform::from_translation(Vec3::new(0.0, 0.0, 0.0));
+            let transform = Transform::from_translation(Vec3::new(0.0, 0.0, *layer as f32));
 
-                let lyon_shape = GeometryBuilder::build_as(
-                    &lyon_poly,
-                    DrawMode::Outlined {
-                        fill_mode: FillMode {
-                            color,
-                            options: FillOptions::default(),
-                        },
-                        outline_mode: StrokeMode {
-                            color,
-                            options: StrokeOptions::default().with_line_width(WIDTH),
-                        },
+            let lyon_shape = GeometryBuilder::build_as(
+                &lyon_poly,
+                DrawMode::Outlined {
+                    fill_mode: FillMode {
+                        color,
+                        options: FillOptions::default(),
                     },
-                    transform,
-                );
+                    outline_mode: StrokeMode {
+                        color,
+                        options: StrokeOptions::default().with_line_width(WIDTH),
+                    },
+                },
+                transform,
+            );
 
-                let bundle = LyonShapeBundle {
-                    lyon: lyon_shape,
-                    ..default()
-                };
+            let bundle = LyonShapeBundle {
+                lyon: lyon_shape,
+                ..default()
+            };
 
-                if let Some((mut existing_path, mut existing_transform, mut vis)) =
-                    existing_shapes_iter.next()
-                {
-                    *existing_path = bundle.lyon.path;
-                    *existing_transform = bundle.lyon.transform;
-                    vis.is_visible = true;
-                } else {
-                    commands.spawn_bundle(bundle);
-                }
+            if let Some((mut existing_path, mut existing_transform, mut vis)) =
+                existing_shapes_iter.next()
+            {
+                *existing_path = bundle.lyon.path;
+                *existing_transform = bundle.lyon.transform;
+                vis.is_visible = true;
+            } else {
+                commands.spawn_bundle(bundle);
             }
         }
+
+        info!(
+            "Num pixels of shapes in this tile: {} billion",
+            num_pixels / 1e9 as u64
+        );
     }
 }
 
@@ -174,14 +171,14 @@ fn spawn_cameras_system(
     mut meshes: ResMut<Assets<Mesh>>,
     mut post_processing_materials: ResMut<Assets<PostProcessingMaterial>>,
     render_queue: Res<RenderQueue>,
-    tilemap: Res<TileMap>,
-    lower_left_res: Res<TileMapLowerLeft>,
+    tilemap: Res<Tilemap>,
+    lower_left_res: Res<TilemapLowerLeft>,
     mut draw_ev: EventReader<DrawTileEvent>,
     rendering_done_channel: Res<RenderingDoneChannel>,
     mut rendering_complete_ev: EventWriter<RenderingCompleteEvent>,
 ) {
     for DrawTileEvent(key) in draw_ev.iter() {
-        if key.0 % 10 == 0 {
+        if key.0 % 15 == 0 {
             rendering_complete_ev.send_default();
             continue;
         }
@@ -306,7 +303,7 @@ fn spawn_cameras_system(
 fn get_or_create_accumulation_texture(
     commands: &mut Commands,
     accumulation_texture: &mut Option<Handle<Image>>,
-    tilemap: &TileMap,
+    tilemap: &Tilemap,
     images: &mut Assets<Image>,
 ) -> Handle<Image> {
     if let Some(handle) = accumulation_texture.as_ref() {
