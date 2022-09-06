@@ -17,14 +17,12 @@ use bevy_prototype_lyon::prelude::*;
 use crossbeam_channel::bounded;
 use std::time::Duration;
 
-use crate::{
-    get_grid_shape,
-    types::{
-        DrawTileEvent, FlattenedElems, LyonShape, LyonShapeBundle, Rect, RenderingCompleteEvent,
-        RenderingDoneChannel, TextureCam, Tilemap, TilemapLowerLeft, ACCUMULATION_CAMERA_PRIORITY,
-        ALPHA, DOWNSCALING_PASS_LAYER, MAIN_CAMERA_LAYER, WIDTH,
-    },
-};
+use crate::{get_grid_shape, Tile, types::{
+    DrawTileEvent, FlattenedElems, LyonShape, LyonShapeBundle, Rect, RenderingCompleteEvent,
+    RenderingDoneChannel, Tilemap, TilemapLowerLeft, ACCUMULATION_CAMERA_PRIORITY,
+    ALPHA, DOWNSCALING_PASS_LAYER, MAIN_CAMERA_LAYER, WIDTH,
+}};
+use crate::types::{AccumulationCam, HiResCam};
 
 pub struct TiledRendererPlugin;
 
@@ -178,6 +176,8 @@ fn spawn_cameras_system(
     mut draw_ev: EventReader<DrawTileEvent>,
     rendering_done_channel: Res<RenderingDoneChannel>,
     mut rendering_complete_ev: EventWriter<RenderingCompleteEvent>,
+    mut hires_cam_q: Query<(&mut Camera, &mut Transform), With<HiResCam>>,
+    mut accumulation_cam_q: Query<&mut Camera, (With<AccumulationCam>, Without<HiResCam>)>,
 ) {
     for DrawTileEvent(key) in draw_ev.iter() {
         if key.0 % 15 == 0 {
@@ -194,7 +194,7 @@ fn spawn_cameras_system(
             &mut images,
         );
 
-        let hires_handle = get_or_create_hires_texture(&mut hires_texture, &mut images);
+        let hires_handle = get_or_create_hi_res_image(&mut hires_texture, &mut images);
 
         let tile_x = tile.extents.min().x - lower_left_res.x;
         let tile_y = tile.extents.min().y - lower_left_res.y;
@@ -206,23 +206,29 @@ fn spawn_cameras_system(
 
         let transform = Transform::from_translation(Vec3::new(x as f32, y as f32, 999.0));
 
-        let mut camera = Camera2dBundle {
-            camera_2d: Camera2d::default(),
-            camera: Camera {
-                target: RenderTarget::Image(hires_handle.clone()),
+        if hires_cam_q.is_empty() {
+            let mut hires_cam = Camera2dBundle {
+                camera_2d: Camera2d::default(),
+                camera: Camera {
+                    target: RenderTarget::Image(hires_handle.clone()),
+                    ..default()
+                },
+                transform,
                 ..default()
-            },
-            transform,
-            ..default()
-        };
+            };
 
-        camera.projection.window_origin = WindowOrigin::BottomLeft;
+            hires_cam.projection.window_origin = WindowOrigin::BottomLeft;
 
-        let size = images.get(&hires_handle).unwrap().size();
+            let size = images.get(&hires_handle).unwrap().size();
+            hires_cam.projection.update(size.x as f32, size.y as f32);
 
-        camera.projection.update(size.x as f32, size.y as f32);
-
-        commands.spawn_bundle(camera).insert(TextureCam);
+            commands.spawn_bundle(hires_cam).insert(HiResCam);
+        } else {
+            for (mut cam, mut cam_transform) in hires_cam_q.iter_mut() {
+                cam.is_active = true;
+                *cam_transform = transform;
+            }
+        }
 
         let (mesh_handle, material_handle) =
             if let Some((mesh_handle, material_handle)) = mesh_and_material.as_ref() {
@@ -270,26 +276,38 @@ fn spawn_cameras_system(
         info!("viewport: {physical_position:?}");
 
         // The accumulation pass camera.
-        commands
-            .spawn_bundle(Camera2dBundle {
-                camera: Camera {
-                    priority: ACCUMULATION_CAMERA_PRIORITY,
-                    target: RenderTarget::Image(accumulation_handle.clone()),
-                    viewport: Some(Viewport {
-                        // this is the same as the calculations we were doing to properly place the small texture's sprite
-                        physical_position,
-                        physical_size: UVec2::new(32, 32),
+        if accumulation_cam_q.is_empty() {
+            commands
+                .spawn_bundle(Camera2dBundle {
+                    camera: Camera {
+                        priority: ACCUMULATION_CAMERA_PRIORITY,
+                        target: RenderTarget::Image(accumulation_handle.clone()),
+                        viewport: Some(Viewport {
+                            // this is the same as the calculations we were doing to properly place the small texture's sprite
+                            physical_position,
+                            physical_size: UVec2::new(32, 32),
+                            ..default()
+                        }),
                         ..default()
-                    }),
+                    },
+                    camera_2d: Camera2d {
+                        clear_color: ClearColorConfig::None,
+                    },
                     ..default()
-                },
-                camera_2d: Camera2d {
-                    clear_color: ClearColorConfig::None,
-                },
-                ..default()
-            })
-            .insert(DOWNSCALING_PASS_LAYER)
-            .insert(TextureCam);
+                })
+                .insert(DOWNSCALING_PASS_LAYER)
+                .insert(AccumulationCam);
+        } else {
+            for mut cam in accumulation_cam_q.iter_mut() {
+                cam.is_active = true;
+                cam.viewport = Some(Viewport {
+                    // this is the same as the calculations we were doing to properly place the small texture's sprite
+                    physical_position,
+                    physical_size: UVec2::new(32, 32),
+                    ..default()
+                });
+            }
+        }
 
         let s = rendering_done_channel.sender.clone();
 
@@ -381,12 +399,12 @@ fn get_or_create_accumulation_texture(
     }
 }
 
-fn get_or_create_hires_texture(
-    hires_texture: &mut Option<Handle<Image>>,
+fn get_or_create_hi_res_image(
+    hires_img: &mut Option<Handle<Image>>,
     images: &mut Assets<Image>,
 ) -> Handle<Image> {
-    if let Some(handle) = hires_texture.as_ref() {
-        (*handle).clone()
+    if let Some(hires_handle) = hires_img.as_ref() {
+        (*hires_handle).clone()
     } else {
         let size = Extent3d {
             width: 4096,
@@ -413,7 +431,7 @@ fn get_or_create_hires_texture(
 
         let handle = images.add(image);
 
-        *hires_texture = Some(handle.clone());
+        *hires_img = Some(handle.clone());
 
         handle
     }
@@ -421,19 +439,26 @@ fn get_or_create_hires_texture(
 
 fn despawn_system(
     mut commands: Commands,
-    cam_q: Query<Entity, With<TextureCam>>,
+    mut hires_cam_q: Query<&mut Camera, With<HiResCam>>,
+    mut accumulation_cam_q: Query<&mut Camera, (With<AccumulationCam>, Without<HiResCam>)>,
     mut shape_q: Query<&mut Visibility, With<LyonShape>>,
     rendering_done_channel: Res<RenderingDoneChannel>,
     mut rendering_complete_ev: EventWriter<RenderingCompleteEvent>,
 ) {
     if let Ok(()) = rendering_done_channel.receiver.try_recv() {
         info!("RENDERING DONE");
-        for cam in cam_q.iter() {
-            commands.entity(cam).despawn();
+        for mut cam in hires_cam_q.iter_mut() {
+            cam.is_active = false;
         }
+
+        for mut cam in accumulation_cam_q.iter_mut() {
+            cam.is_active = false;
+        }
+
         for mut vis in shape_q.iter_mut() {
             vis.is_visible = false;
         }
+
         rendering_complete_ev.send_default();
     }
 }

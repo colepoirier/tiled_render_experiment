@@ -110,7 +110,7 @@ fn create_tilemap_system(
     if !*has_run {
         let texture_dim = render_device.limits().max_texture_dimension_2d;
 
-        let num_elements = 1_000;
+        let num_elements = 1;
         let min_p = Point { x: 0, y: 0 };
         let max_p = Point {
             x: texture_dim as i32 * 64,

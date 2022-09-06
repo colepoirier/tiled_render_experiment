@@ -100,7 +100,10 @@ pub struct MainCamera;
 pub struct LyonShape;
 
 #[derive(Component, Debug)]
-pub struct TextureCam;
+pub struct HiResCam;
+
+#[derive(Component, Debug)]
+pub struct AccumulationCam;
 
 #[derive(Debug, Clone, Copy, Component)]
 pub struct HiResTileMarker;
