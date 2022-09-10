@@ -1,6 +1,14 @@
 use bevy::{
+    core_pipeline::clear_color::ClearColorConfig,
     prelude::*,
-    render::{camera::WindowOrigin, renderer::RenderDevice},
+    render::{
+        camera::{CameraProjection, RenderTarget, Viewport, WindowOrigin},
+        render_resource::{
+            Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
+        },
+        renderer::RenderDevice,
+    },
+    sprite::Anchor,
 };
 
 use bevy_pancam::{PanCam, PanCamPlugin};
@@ -15,12 +23,24 @@ use tiled_renderer::TiledRendererPlugin;
 
 mod types;
 use types::{
-    DrawTileEvent, FlattenedElems, GeoRect, MainCamera, Point, Rect, RenderingCompleteEvent, Tile,
-    TileIndexIter, Tilemap, TilemapLowerLeft, MAIN_CAMERA_LAYER, MAIN_CAMERA_PRIORITY,
+    DrawTileEvent, FlattenedElems, GeoRect, HiResCam, MainCamera, Point, Rect,
+    RenderingCompleteEvent, Tile, TileIndexIter, Tilemap, TilemapLowerLeft, MAIN_CAMERA_LAYER,
+    MAIN_CAMERA_PRIORITY,
 };
 
 mod utils;
 use utils::{generate_random_elements, get_grid_shape, tilemap_stats_and_debug};
+
+use crate::types::{AccumulationCam, ACCUMULATION_CAMERA_PRIORITY, DOWNSCALING_PASS_LAYER};
+
+#[derive(Deref)]
+struct HiResHandle(Handle<Image>);
+
+#[derive(Deref)]
+struct AccumulationHandle(Handle<Image>);
+
+pub const GRID_SIZE_X: u32 = 64;
+pub const GRID_SIZE_Y: u32 = 64;
 
 fn main() {
     App::new()
@@ -49,23 +69,158 @@ fn main() {
         .run();
 }
 
-fn setup(mut commands: Commands) {
+fn initialize_hi_res_resources(commands: &mut Commands, images: &mut Assets<Image>) {
+    let size = Extent3d {
+        width: 4096,
+        height: 4096,
+        ..default()
+    };
+
+    let mut image = Image {
+        texture_descriptor: TextureDescriptor {
+            label: None,
+            size,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Bgra8UnormSrgb,
+            mip_level_count: 1,
+            sample_count: 1,
+            usage: TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_DST
+                | TextureUsages::RENDER_ATTACHMENT,
+        },
+        ..default()
+    };
+
+    // This fills the image with zeros
+    image.resize(size);
+
+    let handle = images.add(image);
+
+    let mut hires_cam = Camera2dBundle {
+        camera_2d: Camera2d::default(),
+        camera: Camera {
+            target: RenderTarget::Image(handle.clone()),
+            ..default()
+        },
+        ..default()
+    };
+
+    hires_cam.projection.window_origin = WindowOrigin::BottomLeft;
+    hires_cam
+        .projection
+        .update(size.width as f32, size.height as f32);
+
+    commands.spawn_bundle(hires_cam).insert(HiResCam);
+    commands.insert_resource(HiResHandle(handle));
+}
+
+fn initialize_accumulation_resources(commands: &mut Commands, images: &mut Assets<Image>) {
+    let size = Extent3d {
+        width: GRID_SIZE_X * 32,
+        height: GRID_SIZE_Y * 32,
+        ..default()
+    };
+
+    info!("creating new accumulation texture");
+    info!("accumulation texture size {size:?}");
+
+    // info!("CREATING NEW ACCUMULATION TEXTURE... SLEEPING FOR 5s");
+
+    // std::thread::sleep(Duration::from_secs(5));
+
+    // This is the texture that will be rendered to.
+    let mut image = Image {
+        texture_descriptor: TextureDescriptor {
+            label: None,
+            size,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Bgra8UnormSrgb,
+            mip_level_count: 1,
+            sample_count: 1,
+            usage: TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_DST
+                | TextureUsages::RENDER_ATTACHMENT,
+        },
+        ..default()
+    };
+
+    // fill image.data with zeroes
+    image.resize(size);
+
+    let handle = images.add(image);
+
+    commands
+        .spawn_bundle(SpriteBundle {
+            sprite: Sprite {
+                custom_size: Some(Vec2::new(size.width as f32, size.height as f32)),
+                anchor: Anchor::BottomLeft,
+                ..default()
+            },
+            texture: handle.clone(),
+            transform: Transform::from_translation((0.0, 0.0, 1.0).into()),
+            ..default()
+        })
+        .insert(MAIN_CAMERA_LAYER);
+
+    commands
+        .spawn_bundle(SpriteBundle {
+            sprite: Sprite {
+                custom_size: Some(Vec2::new(size.width as f32 * 1.1, size.height as f32 * 1.1)),
+                anchor: Anchor::BottomLeft,
+                color: Color::rgb(1.0, 0.0, 0.0),
+                ..default()
+            },
+            transform: Transform::from_translation(
+                (-0.05 * size.width as f32, -0.05 * size.height as f32, 0.0).into(),
+            ),
+            ..default()
+        })
+        .insert(MAIN_CAMERA_LAYER);
+
+    commands
+        .spawn_bundle(Camera2dBundle {
+            camera: Camera {
+                priority: ACCUMULATION_CAMERA_PRIORITY,
+                target: RenderTarget::Image(handle.clone()),
+                viewport: Some(Viewport {
+                    physical_size: UVec2::new(32, 32),
+                    ..default()
+                }),
+                ..default()
+            },
+            camera_2d: Camera2d {
+                clear_color: ClearColorConfig::None,
+            },
+            ..default()
+        })
+        .insert(DOWNSCALING_PASS_LAYER)
+        .insert(AccumulationCam);
+
+    commands.insert_resource(AccumulationHandle(handle));
+}
+
+fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
     let mut camera = Camera2dBundle {
         camera: Camera {
             priority: MAIN_CAMERA_PRIORITY,
             ..default()
         },
-        transform: Transform::from_translation((-9284.8, -100.0, 999.0).into()),
+        transform: Transform::from_translation((0.0, 0.0, 999.0).into()),
         ..Camera2dBundle::default()
     };
     camera.projection.window_origin = WindowOrigin::BottomLeft;
-    camera.projection.scale = 13.0;
+    camera.projection.scale = 4.0;
 
     commands
         .spawn_bundle(camera)
         .insert(MAIN_CAMERA_LAYER)
         .insert(MainCamera)
         .insert(PanCam::default());
+
+    // we should probably just have this as its own setup system
+    initialize_hi_res_resources(&mut commands, &mut images);
+
+    initialize_accumulation_resources(&mut commands, &mut images);
 }
 
 fn camera_changed_system(
