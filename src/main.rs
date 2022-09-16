@@ -115,8 +115,8 @@ fn initialize_hi_res_resources(commands: &mut Commands, images: &mut Assets<Imag
 
 fn initialize_accumulation_resources(commands: &mut Commands, images: &mut Assets<Image>) {
     let size = Extent3d {
-        width: GRID_SIZE_X * 32,
-        height: GRID_SIZE_Y * 32,
+        width: GRID_SIZE_X * TILE_SIZE,
+        height: GRID_SIZE_Y * TILE_SIZE,
         ..default()
     };
 
