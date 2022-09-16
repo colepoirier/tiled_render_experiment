@@ -1,6 +1,5 @@
 use bevy::{
     asset::HandleId,
-    core_pipeline::clear_color::ClearColorConfig,
     prelude::*,
     reflect::TypeUuid,
     render::{
@@ -14,16 +13,13 @@ use bevy::{
 use bevy_prototype_lyon::prelude::*;
 use crossbeam_channel::bounded;
 
+use crate::types::{
+    DrawTileEvent, FlattenedElems, LyonShape, LyonShapeBundle, Rect, RenderingCompleteEvent,
+    RenderingDoneChannel, Tilemap, TilemapLowerLeft, ALPHA, DOWNSCALING_PASS_LAYER, WIDTH,
+};
 use crate::{
     types::{AccumulationCam, HiResCam},
     HiResHandle,
-};
-use crate::{
-    types::{
-        DrawTileEvent, FlattenedElems, LyonShape, LyonShapeBundle, Rect, RenderingCompleteEvent,
-        RenderingDoneChannel, Tilemap, TilemapLowerLeft, ALPHA, DOWNSCALING_PASS_LAYER, WIDTH,
-    },
-    GRID_SIZE_Y,
 };
 
 pub const TILE_SIZE: u32 = 64;
@@ -67,6 +63,7 @@ impl Plugin for TiledRendererPlugin {
     }
 }
 
+#[allow(unused)]
 fn debug_image_handles(q: Query<&Handle<Image>>) {
     for h in q.iter() {
         info!(

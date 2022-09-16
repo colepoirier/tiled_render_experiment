@@ -6,7 +6,6 @@ use bevy::{
         render_resource::{
             Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
         },
-        renderer::RenderDevice,
     },
     sprite::Anchor,
 };
@@ -15,8 +14,6 @@ use bevy_pancam::{PanCam, PanCamPlugin};
 
 use geo::Intersects;
 use itertools::Itertools;
-
-use std::{fs::File, io::Write};
 
 mod tiled_renderer;
 use tiled_renderer::TiledRendererPlugin;
@@ -256,7 +253,6 @@ fn iter_tile_index_system(
 }
 
 fn create_tilemap_system(
-    render_device: Res<RenderDevice>,
     mut tilemap: ResMut<Tilemap>,
     mut tile_index_iter: ResMut<TileIndexIter>,
     mut flattened_elems_res: ResMut<FlattenedElems>,
