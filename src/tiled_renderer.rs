@@ -1,4 +1,6 @@
 use bevy::{
+    asset::HandleId,
+    core_pipeline::clear_color::ClearColorConfig,
     prelude::*,
     reflect::TypeUuid,
     render::{
@@ -23,6 +25,8 @@ use crate::{
     },
     GRID_SIZE_Y,
 };
+
+pub const TILE_SIZE: u32 = 64;
 
 pub struct TiledRendererPlugin;
 
@@ -59,6 +63,20 @@ impl Plugin for TiledRendererPlugin {
             .add_system_to_stage(TiledRenderStage::SpawnCameras, spawn_cameras_system)
             .add_system_to_stage(TiledRenderStage::SpawnShapes, spawn_shapes_system)
             .add_system_to_stage(TiledRenderStage::Despawn, despawn_system);
+        // .add_system(debug_image_handles);
+    }
+}
+
+fn debug_image_handles(q: Query<&Handle<Image>>) {
+    for h in q.iter() {
+        info!(
+            "{:x}",
+            if let HandleId::Id(_, id) = h.id {
+                id
+            } else {
+                0
+            }
+        );
     }
 }
 
@@ -105,10 +123,10 @@ fn spawn_shapes_system(
             let color = *Color::WHITE.clone().set_a(ALPHA);
 
             let Rect { p0, p1, layer } = r;
-            let xmin = p0.x / 4;
-            let ymin = p0.y / 4;
-            let xmax = p1.x / 4;
-            let ymax = p1.y / 4;
+            let xmin = p0.x;
+            let ymin = p0.y;
+            let xmax = p1.x;
+            let ymax = p1.y;
 
             num_pixels += (xmax - xmin) as u64 * (ymax - ymin) as u64;
 
@@ -155,10 +173,7 @@ fn spawn_shapes_system(
             }
         }
 
-        info!(
-            "Num pixels of shapes in this tile: {} billion",
-            num_pixels / 1e9 as u64
-        );
+        info!("Num pixels of shapes in this tile: {}", num_pixels);
     }
 }
 
@@ -190,8 +205,8 @@ fn spawn_cameras_system(
 
         assert!(tile_x >= 0, "tile_x should be positive");
         assert!(tile_y >= 0, "tile_y should be positive");
-        let x = tile_x / 4;
-        let y = tile_y / 4;
+        let x = tile_x;
+        let y = tile_y;
 
         let transform = Transform::from_translation(Vec3::new(x as f32, y as f32, 999.0));
 
@@ -241,7 +256,8 @@ fn spawn_cameras_system(
             })
             .insert(DOWNSCALING_PASS_LAYER);
 
-        let physical_position = UVec2::new((x / 128) as u32, GRID_SIZE_Y * 64 - (y / 128) as u32);
+        let physical_position =
+            UVec2::new((x / TILE_SIZE as i64) as u32, (y / TILE_SIZE as i64) as u32);
 
         info!("viewport: {physical_position:?}");
 
@@ -250,7 +266,7 @@ fn spawn_cameras_system(
             cam.viewport = Some(Viewport {
                 // this is the same as the calculations we were doing to properly place the small texture's sprite
                 physical_position,
-                physical_size: UVec2::new(32, 32),
+                physical_size: UVec2::new(TILE_SIZE, TILE_SIZE),
                 ..default()
             });
         }

@@ -42,6 +42,8 @@ struct AccumulationHandle(Handle<Image>);
 pub const GRID_SIZE_X: u32 = 64;
 pub const GRID_SIZE_Y: u32 = 64;
 
+use crate::tiled_renderer::TILE_SIZE;
+
 fn main() {
     App::new()
         .insert_resource(WindowDescriptor {
@@ -263,23 +265,23 @@ fn create_tilemap_system(
     mut has_run: Local<bool>,
 ) {
     if !*has_run {
-        let texture_dim = render_device.limits().max_texture_dimension_2d;
+        let texture_dim = 4096;
 
-        let num_elements = 1;
+        let num_elements = 1_000_000;
         let min_p = Point { x: 0, y: 0 };
         let max_p = Point {
-            x: texture_dim as i32 * 64,
-            y: texture_dim as i32 * 64,
+            x: (texture_dim * TILE_SIZE) as i32,
+            y: (texture_dim * TILE_SIZE) as i32,
         };
-        let mut flattened_elems = generate_random_elements(num_elements, min_p, max_p);
+        let flattened_elems = generate_random_elements(num_elements, min_p, max_p);
 
-        flattened_elems.sort_by(|a, b| a.p1.x.cmp(&b.p1.x));
+        // flattened_elems.sort_by(|a, b| a.p1.x.cmp(&b.p1.x));
 
-        let mut f = File::create("dbg_random_shapes.txt").unwrap();
+        // let mut f = File::create("dbg_random_shapes.txt").unwrap();
 
-        for r in flattened_elems.iter() {
-            f.write(format!("{r:?}\n").as_bytes()).unwrap();
-        }
+        // for r in flattened_elems.iter() {
+        //     f.write(format!("{r:?}\n").as_bytes()).unwrap();
+        // }
 
         info!("num elems including instances: {}", flattened_elems.len());
 
@@ -317,8 +319,6 @@ fn create_tilemap_system(
         let num_y_tiles = ((dy as f32 / texture_dim as f32) + 0.00001).ceil() as u32;
 
         info!("num_x_tiles: {num_x_tiles}, num_y_tiles: {num_y_tiles}");
-
-        // panic!();
 
         let mut x = bbox.0.x as i64;
         let mut y = bbox.0.y as i64;
@@ -376,7 +376,7 @@ fn create_tilemap_system(
 
             for x in min_tile_x..=max_tile_x {
                 for y in min_tile_y..=max_tile_y {
-                    info!("x {x}, y {y}");
+                    // info!("x {x}, y {y}");
                     let Tile { extents, shapes } = tilemap.get_mut(&(x, y)).unwrap();
 
                     let extents = &*extents;
