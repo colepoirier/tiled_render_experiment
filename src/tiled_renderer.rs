@@ -300,7 +300,7 @@ fn spawn_cameras_system(
                         viewport: Some(Viewport {
                             // this is the same as the calculations we were doing to properly place the small texture's sprite
                             physical_position,
-                            physical_size: UVec2::new(32, 32),
+                            physical_size: UVec2::new(TILE_SIZE, TILE_SIZE),
                             ..default()
                         }),
                         ..default()
@@ -318,7 +318,7 @@ fn spawn_cameras_system(
                 cam.viewport = Some(Viewport {
                     // this is the same as the calculations we were doing to properly place the small texture's sprite
                     physical_position,
-                    physical_size: UVec2::new(32, 32),
+                    physical_size: UVec2::new(TILE_SIZE, TILE_SIZE),
                     ..default()
                 });
             }
