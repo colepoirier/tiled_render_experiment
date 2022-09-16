@@ -1,4 +1,5 @@
 use bevy::{
+    asset::HandleId,
     core_pipeline::clear_color::ClearColorConfig,
     prelude::*,
     reflect::TypeUuid,
@@ -25,6 +26,8 @@ use crate::{
         ALPHA, DOWNSCALING_PASS_LAYER, MAIN_CAMERA_LAYER, WIDTH,
     },
 };
+
+pub const TILE_SIZE: u32 = 64;
 
 pub struct TiledRendererPlugin;
 
@@ -61,6 +64,20 @@ impl Plugin for TiledRendererPlugin {
             .add_system_to_stage(TiledRenderStage::SpawnCameras, spawn_cameras_system)
             .add_system_to_stage(TiledRenderStage::SpawnShapes, spawn_shapes_system)
             .add_system_to_stage(TiledRenderStage::Despawn, despawn_system);
+        // .add_system(debug_image_handles);
+    }
+}
+
+fn debug_image_handles(q: Query<&Handle<Image>>) {
+    for h in q.iter() {
+        info!(
+            "{:x}",
+            if let HandleId::Id(_, id) = h.id {
+                id
+            } else {
+                0
+            }
+        );
     }
 }
 
@@ -107,10 +124,10 @@ fn spawn_shapes_system(
             let color = *Color::WHITE.clone().set_a(ALPHA);
 
             let Rect { p0, p1, layer } = r;
-            let xmin = p0.x / 4;
-            let ymin = p0.y / 4;
-            let xmax = p1.x / 4;
-            let ymax = p1.y / 4;
+            let xmin = p0.x;
+            let ymin = p0.y;
+            let xmax = p1.x;
+            let ymax = p1.y;
 
             num_pixels += (xmax - xmin) as u64 * (ymax - ymin) as u64;
 
@@ -157,10 +174,7 @@ fn spawn_shapes_system(
             }
         }
 
-        info!(
-            "Num pixels of shapes in this tile: {} billion",
-            num_pixels / 1e9 as u64
-        );
+        info!("Num pixels of shapes in this tile: {}", num_pixels);
     }
 }
 
@@ -201,8 +215,8 @@ fn spawn_cameras_system(
 
         assert!(tile_x >= 0, "tile_x should be positive");
         assert!(tile_y >= 0, "tile_y should be positive");
-        let x = tile_x / 4;
-        let y = tile_y / 4;
+        let x = tile_x;
+        let y = tile_y;
 
         let transform = Transform::from_translation(Vec3::new(x as f32, y as f32, 999.0));
 
@@ -265,7 +279,8 @@ fn spawn_cameras_system(
             })
             .insert(DOWNSCALING_PASS_LAYER);
 
-        let physical_position = UVec2::new((x / 128) as u32, (y / 128) as u32);
+        let physical_position =
+            UVec2::new((x / TILE_SIZE as i64) as u32, (y / TILE_SIZE as i64) as u32);
 
         info!("viewport: {physical_position:?}");
 
@@ -278,7 +293,7 @@ fn spawn_cameras_system(
                     viewport: Some(Viewport {
                         // this is the same as the calculations we were doing to properly place the small texture's sprite
                         physical_position,
-                        physical_size: UVec2::new(32, 32),
+                        physical_size: UVec2::new(TILE_SIZE, TILE_SIZE),
                         ..default()
                     }),
                     ..default()
@@ -309,12 +324,13 @@ fn get_or_create_accumulation_texture(
     images: &mut Assets<Image>,
 ) -> Handle<Image> {
     if let Some(handle) = accumulation_texture.as_ref() {
+        info!("REUSING ACCUMULATION TEXTURE");
         (*handle).clone()
     } else {
         let (grid_x, grid_y) = get_grid_shape(&tilemap);
         let size = Extent3d {
-            width: grid_x * 32,
-            height: grid_y * 32,
+            width: grid_x * TILE_SIZE,
+            height: grid_y * TILE_SIZE,
             ..default()
         };
 
@@ -386,8 +402,10 @@ fn get_or_create_hires_texture(
     images: &mut Assets<Image>,
 ) -> Handle<Image> {
     if let Some(handle) = hires_texture.as_ref() {
+        info!("REUSING HIRES TEXTURE");
         (*handle).clone()
     } else {
+        info!("CREATING NEW HIRES TEXTURE");
         let size = Extent3d {
             width: 4096,
             height: 4096,
@@ -396,7 +414,7 @@ fn get_or_create_hires_texture(
 
         let mut image = Image {
             texture_descriptor: TextureDescriptor {
-                label: None,
+                label: Some("HIRES_TEXTURE"),
                 size,
                 dimension: TextureDimension::D2,
                 format: TextureFormat::Bgra8UnormSrgb,

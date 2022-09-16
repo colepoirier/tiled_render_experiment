@@ -40,19 +40,23 @@ use crate::types::{Point, Rect, Tilemap};
 // }
 
 pub fn generate_random_rect(rng: &mut StdRng, min_p: Point, max_p: Point) -> Rect {
-    let p0 = Point {
-        x: rng.gen_range(min_p.x..max_p.x),
-        y: rng.gen_range(min_p.y..max_p.y),
-    };
-    let max_w = max_p.x - p0.x;
-    let max_h = max_p.y - p0.y;
-    let p1 = Point {
-        x: p0.x + rng.gen_range(0..max_w),
-        y: p0.y + rng.gen_range(0..max_h),
-    };
+    let mut x = rng.gen_range(min_p.x..max_p.x);
+    let mut y = rng.gen_range(min_p.y..max_p.y);
+
+    if x > (max_p.x - 1000) {
+        x -= 1000;
+    }
+
+    if y > (max_p.y - 1000) {
+        y -= 1000;
+    }
+
     Rect {
-        p0,
-        p1,
+        p0: Point { x, y },
+        p1: Point {
+            x: x + 1000,
+            y: y + 1000,
+        },
         layer: rng.gen_range(0..100),
     }
 }
