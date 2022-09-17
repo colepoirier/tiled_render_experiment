@@ -14,7 +14,7 @@ use bevy_prototype_lyon::prelude::*;
 use crossbeam_channel::bounded;
 
 use crate::types::{
-    DrawTileEvent, FlattenedElems, LyonShape, LyonShapeBundle, Rect, RenderingCompleteEvent,
+    DrawTileEvent, Rects, LyonShape, LyonShapeBundle, Rect, RenderingCompleteEvent,
     RenderingDoneChannel, Tilemap, TilemapLowerLeft, ALPHA, DOWNSCALING_PASS_LAYER, WIDTH,
 };
 use crate::{
@@ -80,7 +80,7 @@ fn debug_image_handles(q: Query<&Handle<Image>>) {
 fn spawn_shapes_system(
     mut commands: Commands,
     tilemap: Res<Tilemap>,
-    flattened_elems: Res<FlattenedElems>,
+    rects: Res<Rects>,
     mut draw_ev: EventReader<DrawTileEvent>,
     mut existing_lyon_shapes: Query<
         (
@@ -103,7 +103,7 @@ fn spawn_shapes_system(
         // let mut num_duplicates = 0;
 
         // for idx in tile.shapes.iter() {
-        //     let e = &(**flattened_elems)[*idx];
+        //     let e = &(**rects)[*idx];
         //     if !set.insert(e) {
         //         num_duplicates += 1;
         //     }
@@ -115,7 +115,7 @@ fn spawn_shapes_system(
 
         let mut existing_shapes_iter = existing_lyon_shapes.iter_mut();
         for idx in tile.shapes.iter() {
-            let r = &(**flattened_elems)[*idx];
+            let r = &(**rects)[*idx];
 
             let color = *Color::WHITE.clone().set_a(ALPHA);
 
@@ -261,7 +261,6 @@ fn spawn_cameras_system(
         for mut cam in accumulation_cam_q.iter_mut() {
             cam.is_active = true;
             cam.viewport = Some(Viewport {
-                // this is the same as the calculations we were doing to properly place the small texture's sprite
                 physical_position,
                 physical_size: UVec2::new(TILE_SIZE, TILE_SIZE),
                 ..default()

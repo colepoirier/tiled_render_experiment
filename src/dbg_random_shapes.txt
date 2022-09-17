@@ -1,1 +1,0 @@
-Rect { p0: Point { x: 18400, y: 483008 }, p1: Point { x: 566335, y: 763404 }, layer: 38 }

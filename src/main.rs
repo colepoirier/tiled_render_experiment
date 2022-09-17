@@ -20,7 +20,7 @@ use tiled_renderer::TiledRendererPlugin;
 
 mod types;
 use types::{
-    DrawTileEvent, FlattenedElems, GeoRect, HiResCam, MainCamera, Point, Rect,
+    DrawTileEvent, Rects, GeoRect, HiResCam, MainCamera, Point, Rect,
     RenderingCompleteEvent, Tile, TileIndexIter, Tilemap, TilemapLowerLeft, MAIN_CAMERA_LAYER,
     MAIN_CAMERA_PRIORITY,
 };
@@ -36,8 +36,7 @@ struct HiResHandle(Handle<Image>);
 #[derive(Deref)]
 struct AccumulationHandle(Handle<Image>);
 
-pub const GRID_SIZE_X: u32 = 64;
-pub const GRID_SIZE_Y: u32 = 64;
+pub const TEXTURE_DIM: u32 = 4096;
 
 use crate::tiled_renderer::TILE_SIZE;
 
@@ -52,7 +51,7 @@ fn main() {
         .add_plugins(DefaultPlugins)
         .add_plugin(PanCamPlugin)
         .add_plugin(TiledRendererPlugin)
-        .init_resource::<FlattenedElems>()
+        .init_resource::<Rects>()
         .init_resource::<Tilemap>()
         .init_resource::<TilemapLowerLeft>()
         .init_resource::<TileIndexIter>()
@@ -70,14 +69,14 @@ fn main() {
 
 fn initialize_hi_res_resources(commands: &mut Commands, images: &mut Assets<Image>) {
     let size = Extent3d {
-        width: 4096,
-        height: 4096,
+        width: TEXTURE_DIM,
+        height: TEXTURE_DIM,
         ..default()
     };
 
     let mut image = Image {
         texture_descriptor: TextureDescriptor {
-            label: None,
+            label: Some("HIRES_TEXTURE"),
             size,
             dimension: TextureDimension::D2,
             format: TextureFormat::Bgra8UnormSrgb,
@@ -115,8 +114,8 @@ fn initialize_hi_res_resources(commands: &mut Commands, images: &mut Assets<Imag
 
 fn initialize_accumulation_resources(commands: &mut Commands, images: &mut Assets<Image>) {
     let size = Extent3d {
-        width: GRID_SIZE_X * TILE_SIZE,
-        height: GRID_SIZE_Y * TILE_SIZE,
+        width: TEXTURE_DIM,
+        height: TEXTURE_DIM,
         ..default()
     };
 
@@ -130,7 +129,7 @@ fn initialize_accumulation_resources(commands: &mut Commands, images: &mut Asset
     // This is the texture that will be rendered to.
     let mut image = Image {
         texture_descriptor: TextureDescriptor {
-            label: None,
+            label: Some("ACCUMULATION_TEXTURE"),
             size,
             dimension: TextureDimension::D2,
             format: TextureFormat::Bgra8UnormSrgb,
@@ -148,6 +147,7 @@ fn initialize_accumulation_resources(commands: &mut Commands, images: &mut Asset
 
     let handle = images.add(image);
 
+    // sprite with the accumulation texture
     commands
         .spawn_bundle(SpriteBundle {
             sprite: Sprite {
@@ -161,6 +161,8 @@ fn initialize_accumulation_resources(commands: &mut Commands, images: &mut Asset
         })
         .insert(MAIN_CAMERA_LAYER);
 
+    // sprite that is 10% larger than the accumulation texture and underneath/futher from the camera
+    // than the accumulation texture sprite to indicate where the texture is/outline it
     commands
         .spawn_bundle(SpriteBundle {
             sprite: Sprite {
@@ -176,13 +178,14 @@ fn initialize_accumulation_resources(commands: &mut Commands, images: &mut Asset
         })
         .insert(MAIN_CAMERA_LAYER);
 
+    
     commands
         .spawn_bundle(Camera2dBundle {
             camera: Camera {
                 priority: ACCUMULATION_CAMERA_PRIORITY,
                 target: RenderTarget::Image(handle.clone()),
                 viewport: Some(Viewport {
-                    physical_size: UVec2::new(32, 32),
+                    physical_size: UVec2::new(TILE_SIZE, TILE_SIZE),
                     ..default()
                 }),
                 ..default()
@@ -199,6 +202,7 @@ fn initialize_accumulation_resources(commands: &mut Commands, images: &mut Asset
 }
 
 fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
+    // configure and spawn the main camera
     let mut camera = Camera2dBundle {
         camera: Camera {
             priority: MAIN_CAMERA_PRIORITY,
@@ -216,7 +220,6 @@ fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
         .insert(MainCamera)
         .insert(PanCam::default());
 
-    // we should probably just have this as its own setup system
     initialize_hi_res_resources(&mut commands, &mut images);
 
     initialize_accumulation_resources(&mut commands, &mut images);
@@ -255,31 +258,29 @@ fn iter_tile_index_system(
 fn create_tilemap_system(
     mut tilemap: ResMut<Tilemap>,
     mut tile_index_iter: ResMut<TileIndexIter>,
-    mut flattened_elems_res: ResMut<FlattenedElems>,
+    mut rects_res: ResMut<Rects>,
     mut min_offset_res: ResMut<TilemapLowerLeft>,
     mut ev: EventWriter<DrawTileEvent>,
     mut has_run: Local<bool>,
 ) {
     if !*has_run {
-        let texture_dim = 4096;
-
         let num_elements = 1_000_000;
         let min_p = Point { x: 0, y: 0 };
         let max_p = Point {
-            x: (texture_dim * TILE_SIZE) as i32,
-            y: (texture_dim * TILE_SIZE) as i32,
+            x: (TEXTURE_DIM * TILE_SIZE) as i32,
+            y: (TEXTURE_DIM * TILE_SIZE) as i32,
         };
-        let flattened_elems = generate_random_elements(num_elements, min_p, max_p);
+        let rects = generate_random_elements(num_elements, min_p, max_p);
 
-        // flattened_elems.sort_by(|a, b| a.p1.x.cmp(&b.p1.x));
+        // rects.sort_by(|a, b| a.p1.x.cmp(&b.p1.x));
 
         // let mut f = File::create("dbg_random_shapes.txt").unwrap();
 
-        // for r in flattened_elems.iter() {
+        // for r in rects.iter() {
         //     f.write(format!("{r:?}\n").as_bytes()).unwrap();
         // }
 
-        info!("num elems including instances: {}", flattened_elems.len());
+        info!("num elems including instances: {}", rects.len());
 
         let mut bbox = (
             Point {
@@ -292,7 +293,7 @@ fn create_tilemap_system(
             },
         );
 
-        for elem in flattened_elems.iter() {
+        for elem in rects.iter() {
             bbox.0.x = bbox.0.x.min(elem.p0.x).min(elem.p1.x);
             bbox.0.y = bbox.0.y.min(elem.p0.y).min(elem.p1.y);
             bbox.1.x = bbox.1.x.max(elem.p0.x).max(elem.p1.x);
@@ -304,15 +305,15 @@ fn create_tilemap_system(
             y: bbox.0.y as i64,
         };
 
-        info!("flattened bbox is {bbox:?}");
+        info!("total bbox is {bbox:?}");
 
         let dx = bbox.1.x - bbox.0.x;
         let dy = bbox.1.y - bbox.0.y;
 
         info!("(dx {dx}, dy {dy})");
 
-        let num_x_tiles = ((dx as f32 / texture_dim as f32) + 0.00001).ceil() as u32;
-        let num_y_tiles = ((dy as f32 / texture_dim as f32) + 0.00001).ceil() as u32;
+        let num_x_tiles = ((dx as f32 / TEXTURE_DIM as f32) + 0.00001).ceil() as u32;
+        let num_y_tiles = ((dy as f32 / TEXTURE_DIM as f32) + 0.00001).ceil() as u32;
 
         info!("num_x_tiles: {num_x_tiles}, num_y_tiles: {num_y_tiles}");
 
@@ -328,11 +329,11 @@ fn create_tilemap_system(
 
         for iy in 0..num_y_tiles {
             let ymin = y;
-            y += texture_dim as i64;
+            y += TEXTURE_DIM as i64;
             let ymax = y;
             for ix in 0..num_x_tiles {
                 let xmin = x;
-                x += texture_dim as i64;
+                x += TEXTURE_DIM as i64;
                 let xmax = x;
 
                 let extents = GeoRect::new((xmin, ymin), (xmax, ymax));
@@ -355,13 +356,13 @@ fn create_tilemap_system(
 
         let t = std::time::Instant::now();
 
-        for (idx, rect) in flattened_elems.iter().enumerate() {
+        for (idx, rect) in rects.iter().enumerate() {
             let Rect { p0, p1, .. } = rect.shift(&tilemap_shift);
 
-            let min_tile_x = p0.x as u32 / texture_dim;
-            let min_tile_y = p0.y as u32 / texture_dim;
-            let max_tile_x = p1.x as u32 / texture_dim;
-            let max_tile_y = p1.y as u32 / texture_dim;
+            let min_tile_x = p0.x as u32 / TEXTURE_DIM;
+            let min_tile_y = p0.y as u32 / TEXTURE_DIM;
+            let max_tile_x = p1.x as u32 / TEXTURE_DIM;
+            let max_tile_y = p1.y as u32 / TEXTURE_DIM;
 
             // info!("min_tile_x: {min_tile_x}");
             // info!("max_tile_x: {max_tile_x}");
@@ -392,7 +393,7 @@ fn create_tilemap_system(
 
         info!("DONE {shape_count} shapes in {:?}!", t.elapsed());
 
-        *flattened_elems_res = FlattenedElems(flattened_elems);
+        *rects_res = Rects(rects);
 
         tilemap_stats_and_debug(&tilemap);
 

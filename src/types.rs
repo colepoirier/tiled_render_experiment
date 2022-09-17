@@ -8,7 +8,10 @@ use crossbeam_channel::{Receiver, Sender};
 
 use std::ops::Range;
 
+//
 // constants
+//
+
 pub const ACCUMULATION_CAMERA_PRIORITY: isize = 1;
 pub const MAIN_CAMERA_PRIORITY: isize = 2;
 
@@ -52,7 +55,9 @@ impl Rect {
     }
 }
 
+//
 // TileMap related types
+//
 
 pub type GeoRect = geo::Rect<i64>;
 
@@ -71,9 +76,12 @@ pub struct TilemapLowerLeft {
     pub y: i64,
 }
 
+//
 // Resources
+//
+
 #[derive(Debug, Default, Deref, DerefMut)]
-pub struct FlattenedElems(pub Vec<Rect>);
+pub struct Rects(pub Vec<Rect>);
 
 #[derive(Debug, Default, Deref, DerefMut)]
 pub struct TileIndexIter(pub Option<itertools::Product<Range<u32>, Range<u32>>>);
@@ -83,7 +91,9 @@ pub struct RenderingDoneChannel {
     pub receiver: Receiver<()>,
 }
 
+//
 // Events
+//
 
 #[derive(Debug, Default, Clone, Copy)]
 pub struct DrawTileEvent(pub (u32, u32));
@@ -91,7 +101,9 @@ pub struct DrawTileEvent(pub (u32, u32));
 #[derive(Debug, Default)]
 pub struct RenderingCompleteEvent;
 
+//
 // Components
+//
 
 #[derive(Debug, Component)]
 pub struct MainCamera;
@@ -104,12 +116,6 @@ pub struct HiResCam;
 
 #[derive(Component, Debug)]
 pub struct AccumulationCam;
-
-#[derive(Debug, Clone, Copy, Component)]
-pub struct HiResTileMarker;
-
-#[derive(Debug, Clone, Copy, Component)]
-pub struct DownscaledTileMarker;
 
 #[derive(Bundle, Default)]
 pub struct LyonShapeBundle {
