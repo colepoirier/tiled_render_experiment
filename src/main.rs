@@ -9,7 +9,7 @@ use bevy::{
     utils::hashbrown::HashMap,
 };
 
-use std::{ops::Range, f32::consts::E};
+use std::{f32::consts::E, ops::Range};
 
 use csv::Writer;
 use futures_lite::future;
@@ -30,21 +30,10 @@ pub enum GeoShapeEnum {
     Polygon(GeoPolygon),
 }
 
-#[derive(Default)]
+#[derive(Debug)]
 pub struct Tile {
     pub extents: GeoRect,
     pub shapes: Vec<usize>,
-}
-
-impl std::fmt::Debug for Tile {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> Result<(), std::fmt::Error> {
-        write!(
-            f,
-            "Tile {{ {:?}, num_shapes: {} }}",
-            self.extents,
-            self.shapes.len()
-        )
-    }
 }
 
 #[derive(Debug, Default, Deref, DerefMut)]
@@ -139,7 +128,7 @@ fn main() {
         .add_event::<DrawTileEvent>()
         .add_event::<TileIndexIter>()
         .add_event::<RenderingCompleteEvent>()
-        .init_resource::<Msaa>()
+        .insert_resource(Msaa { samples: 1 })
         .add_startup_system(setup)
         .add_system(spawn_vlsir_open_task_sytem)
         .add_system(handle_vlsir_open_task_system)
@@ -509,15 +498,17 @@ pub fn import_cell_shapes(
                                 RectMove::Left
                             }
                         } else {
-                            panic!("rectilinear moves expected, but found: p0 {p0:?} and p1 {p1:?}");
+                            panic!(
+                                "rectilinear moves expected, but found: p0 {p0:?} and p1 {p1:?}"
+                            );
                         }
                     }
 
                     fn shift_pure_right(
-                        forward_poly_points: &mut Vec<raw::Point>, 
-                        backward_poly_points: &mut Vec<raw::Point>, 
-                        p0: raw::Point, 
-                        half_width: isize
+                        forward_poly_points: &mut Vec<raw::Point>,
+                        backward_poly_points: &mut Vec<raw::Point>,
+                        p0: raw::Point,
+                        half_width: isize,
                     ) {
                         forward_poly_points.push(raw::Point {
                             x: p0.x,
@@ -530,10 +521,10 @@ pub fn import_cell_shapes(
                     }
 
                     fn shift_pure_left(
-                        forward_poly_points: &mut Vec<raw::Point>, 
-                        backward_poly_points: &mut Vec<raw::Point>, 
-                        p0: raw::Point, 
-                        half_width: isize
+                        forward_poly_points: &mut Vec<raw::Point>,
+                        backward_poly_points: &mut Vec<raw::Point>,
+                        p0: raw::Point,
+                        half_width: isize,
                     ) {
                         forward_poly_points.push(raw::Point {
                             x: p0.x,
@@ -546,10 +537,10 @@ pub fn import_cell_shapes(
                     }
 
                     fn shift_pure_up(
-                        forward_poly_points: &mut Vec<raw::Point>, 
-                        backward_poly_points: &mut Vec<raw::Point>, 
-                        p0: raw::Point, 
-                        half_width: isize
+                        forward_poly_points: &mut Vec<raw::Point>,
+                        backward_poly_points: &mut Vec<raw::Point>,
+                        p0: raw::Point,
+                        half_width: isize,
                     ) {
                         forward_poly_points.push(raw::Point {
                             x: p0.x + half_width,
@@ -562,10 +553,10 @@ pub fn import_cell_shapes(
                     }
 
                     fn shift_pure_down(
-                        forward_poly_points: &mut Vec<raw::Point>, 
-                        backward_poly_points: &mut Vec<raw::Point>, 
-                        p0: raw::Point, 
-                        half_width: isize
+                        forward_poly_points: &mut Vec<raw::Point>,
+                        backward_poly_points: &mut Vec<raw::Point>,
+                        p0: raw::Point,
+                        half_width: isize,
                     ) {
                         forward_poly_points.push(raw::Point {
                             x: p0.x - half_width,
@@ -578,10 +569,10 @@ pub fn import_cell_shapes(
                     }
 
                     fn shift_right_up(
-                        forward_poly_points: &mut Vec<raw::Point>, 
-                        backward_poly_points: &mut Vec<raw::Point>, 
-                        p0: raw::Point, 
-                        half_width: isize
+                        forward_poly_points: &mut Vec<raw::Point>,
+                        backward_poly_points: &mut Vec<raw::Point>,
+                        p0: raw::Point,
+                        half_width: isize,
                     ) {
                         forward_poly_points.push(raw::Point {
                             x: p0.x + half_width,
@@ -594,19 +585,19 @@ pub fn import_cell_shapes(
                     }
 
                     fn shift_left_down(
-                        forward_poly_points: &mut Vec<raw::Point>, 
-                        backward_poly_points: &mut Vec<raw::Point>, 
-                        p0: raw::Point, 
-                        half_width: isize
+                        forward_poly_points: &mut Vec<raw::Point>,
+                        backward_poly_points: &mut Vec<raw::Point>,
+                        p0: raw::Point,
+                        half_width: isize,
                     ) {
                         shift_right_up(backward_poly_points, forward_poly_points, p0, half_width);
                     }
 
                     fn shift_right_down(
-                        forward_poly_points: &mut Vec<raw::Point>, 
-                        backward_poly_points: &mut Vec<raw::Point>, 
-                        p0: raw::Point, 
-                        half_width: isize
+                        forward_poly_points: &mut Vec<raw::Point>,
+                        backward_poly_points: &mut Vec<raw::Point>,
+                        p0: raw::Point,
+                        half_width: isize,
                     ) {
                         forward_poly_points.push(raw::Point {
                             x: p0.x - half_width,
@@ -619,26 +610,49 @@ pub fn import_cell_shapes(
                     }
 
                     fn shift_left_up(
-                        forward_poly_points: &mut Vec<raw::Point>, 
-                        backward_poly_points: &mut Vec<raw::Point>, 
-                        p0: raw::Point, 
-                        half_width: isize
+                        forward_poly_points: &mut Vec<raw::Point>,
+                        backward_poly_points: &mut Vec<raw::Point>,
+                        p0: raw::Point,
+                        half_width: isize,
                     ) {
                         shift_right_down(backward_poly_points, forward_poly_points, p0, half_width);
                     }
 
-                    assert!(num_points > 1, "Expected number of points in path to be > 1");
+                    assert!(
+                        num_points > 1,
+                        "Expected number of points in path to be > 1"
+                    );
                     let start_move = calculate_move(p.points[0], p.points[1]);
 
                     match start_move {
-                        RectMove::Right => shift_pure_right(&mut forward_poly_points, &mut backward_poly_points, p.points[0], half_width),
-                        RectMove::Left => shift_pure_left(&mut forward_poly_points, &mut backward_poly_points, p.points[0], half_width),
-                        RectMove::Up => shift_pure_up(&mut forward_poly_points, &mut backward_poly_points, p.points[0], half_width),
-                        RectMove::Down => shift_pure_down(&mut forward_poly_points, &mut backward_poly_points, p.points[0], half_width)
+                        RectMove::Right => shift_pure_right(
+                            &mut forward_poly_points,
+                            &mut backward_poly_points,
+                            p.points[0],
+                            half_width,
+                        ),
+                        RectMove::Left => shift_pure_left(
+                            &mut forward_poly_points,
+                            &mut backward_poly_points,
+                            p.points[0],
+                            half_width,
+                        ),
+                        RectMove::Up => shift_pure_up(
+                            &mut forward_poly_points,
+                            &mut backward_poly_points,
+                            p.points[0],
+                            half_width,
+                        ),
+                        RectMove::Down => shift_pure_down(
+                            &mut forward_poly_points,
+                            &mut backward_poly_points,
+                            p.points[0],
+                            half_width,
+                        ),
                     }
 
                     let mut last_move = start_move;
-                    
+
                     for ix in 1..(num_points - 1) {
                         let p0 = p.points[ix];
                         let p1 = p.points[ix + 1];
@@ -654,15 +668,36 @@ pub fn import_cell_shapes(
                             (RectMove::Left, RectMove::Down) | (RectMove::Down, RectMove::Left) => shift_left_down(&mut forward_poly_points, &mut backward_poly_points, p.points[0], half_width),
                             (_, _) => panic!("Received opposing last/next moves! last: {last_move:?}, next: {next_move:?}"),
                         }
-                        next_move = next_move;
+                        last_move = next_move;
                     }
 
-                    let end_move = calculate_move(p.points[num_points - 2], p.points[num_points - 1]);
+                    let end_move =
+                        calculate_move(p.points[num_points - 2], p.points[num_points - 1]);
                     match end_move {
-                        RectMove::Right => shift_pure_right(&mut forward_poly_points, &mut backward_poly_points, p.points[num_points - 1], half_width),
-                        RectMove::Left => shift_pure_left(&mut forward_poly_points, &mut backward_poly_points, p.points[num_points - 1], half_width),
-                        RectMove::Up => shift_pure_up(&mut forward_poly_points, &mut backward_poly_points, p.points[num_points - 1], half_width),
-                        RectMove::Down => shift_pure_down(&mut forward_poly_points, &mut backward_poly_points, p.points[num_points - 1], half_width)
+                        RectMove::Right => shift_pure_right(
+                            &mut forward_poly_points,
+                            &mut backward_poly_points,
+                            p.points[num_points - 1],
+                            half_width,
+                        ),
+                        RectMove::Left => shift_pure_left(
+                            &mut forward_poly_points,
+                            &mut backward_poly_points,
+                            p.points[num_points - 1],
+                            half_width,
+                        ),
+                        RectMove::Up => shift_pure_up(
+                            &mut forward_poly_points,
+                            &mut backward_poly_points,
+                            p.points[num_points - 1],
+                            half_width,
+                        ),
+                        RectMove::Down => shift_pure_down(
+                            &mut forward_poly_points,
+                            &mut backward_poly_points,
+                            p.points[num_points - 1],
+                            half_width,
+                        ),
                     }
 
                     let poly = GeoPolygon::new(
