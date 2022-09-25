@@ -20,9 +20,8 @@ use tiled_renderer::TiledRendererPlugin;
 
 mod types;
 use types::{
-    DrawTileEvent, Rects, GeoRect, HiResCam, MainCamera, Point, Rect,
-    RenderingCompleteEvent, Tile, TileIndexIter, Tilemap, TilemapLowerLeft, MAIN_CAMERA_LAYER,
-    MAIN_CAMERA_PRIORITY,
+    DrawTileEvent, GeoRect, HiResCam, MainCamera, Point, Rect, Rects, RenderingCompleteEvent, Tile,
+    TileIndexIter, Tilemap, TilemapLowerLeft, MAIN_CAMERA_LAYER, MAIN_CAMERA_PRIORITY,
 };
 
 mod utils;
@@ -58,7 +57,7 @@ fn main() {
         .add_event::<DrawTileEvent>()
         .add_event::<TileIndexIter>()
         .add_event::<RenderingCompleteEvent>()
-        .init_resource::<Msaa>()
+        .insert_resource(Msaa { samples: 1 })
         .add_startup_system(setup)
         .add_system(create_tilemap_system)
         .add_system(iter_tile_index_system)
@@ -178,7 +177,6 @@ fn initialize_accumulation_resources(commands: &mut Commands, images: &mut Asset
         })
         .insert(MAIN_CAMERA_LAYER);
 
-    
     commands
         .spawn_bundle(Camera2dBundle {
             camera: Camera {
