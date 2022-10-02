@@ -1,17 +1,19 @@
 use bevy::{
-    input::mouse::{MouseScrollUnit, MouseWheel},
+    core_pipeline::clear_color::ClearColorConfig,
     prelude::*,
     render::{
-        camera::{Projection, WindowOrigin},
+        camera::{CameraProjection, RenderTarget, Viewport, WindowOrigin},
+        render_resource::{
+            Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
+        },
         renderer::RenderDevice,
     },
+    sprite::Anchor,
     tasks::{AsyncComputeTaskPool, Task},
-    utils::hashbrown::HashMap,
 };
 
-use std::{f32::consts::E, ops::Range};
+use bevy_pancam::{PanCam, PanCamPlugin};
 
-use csv::Writer;
 use futures_lite::future;
 use geo::Intersects;
 use itertools::Itertools;
@@ -19,91 +21,29 @@ use layout21::raw::{self, proto::ProtoImporter, BoundBox, BoundBoxTrait, Library
 
 pub mod tiled_renderer;
 
-use tiled_renderer::{TiledRendererPlugin, MAIN_CAMERA_LAYER};
+use tiled_renderer::TiledRendererPlugin;
 
-pub type GeoRect = geo::Rect<i64>;
-pub type GeoPolygon = geo::Polygon<i64>;
+use crate::{
+    tiled_renderer::TILE_SIZE,
+    types::{
+        AccumulationCam, AccumulationHandle, GeoRect, Tile, ACCUMULATION_CAMERA_PRIORITY,
+        DOWNSCALING_PASS_LAYER,
+    },
+    utils::{get_grid_shape, tilemap_stats_and_debug},
+};
 
-#[derive(Debug, Clone)]
-pub enum GeoShapeEnum {
-    Rect(GeoRect),
-    Polygon(GeoPolygon),
-}
+mod path_to_poly;
+mod types;
+mod utils;
 
-#[derive(Debug)]
-pub struct Tile {
-    pub extents: GeoRect,
-    pub shapes: Vec<usize>,
-}
+use path_to_poly::make_path_into_polygon;
 
-#[derive(Debug, Default, Deref, DerefMut)]
-pub struct TileMap(HashMap<(u32, u32), Tile>);
-
-#[derive(Debug, Default)]
-pub struct TileMapLowerLeft {
-    x: i64,
-    y: i64,
-}
-
-#[derive(Debug, Default, Deref, DerefMut)]
-pub struct FlattenedElems(Vec<raw::Element>);
-
-#[derive(Debug, Default, Clone, Copy)]
-pub struct OpenVlsirLibCompleteEvent;
-
-#[derive(Debug, Default)]
-struct VlsirLib {
-    pub lib: Option<Library>,
-}
-
-#[derive(Debug, Component, Deref, DerefMut)]
-struct LibraryWrapper(Task<Library>);
-
-#[derive(Debug, Default, Clone, Deref, DerefMut)]
-pub struct Layers(HashMap<u8, Color>);
-
-#[derive(Debug, Default, Clone, Deref, DerefMut)]
-pub struct LibLayers(raw::Layers);
-
-#[derive(Debug)]
-pub struct LayerColors {
-    colors: std::iter::Cycle<std::vec::IntoIter<Color>>,
-}
-
-impl Default for LayerColors {
-    fn default() -> Self {
-        Self {
-            // IBM Design Language Color Library - Color blind safe palette
-            // https://web.archive.org/web/20220304221053/https://ibm-design-language.eu-de.mybluemix.net/design/language/resources/color-library/
-            // Color Names: Ultramarine 40, Indigo 50, Magenta 50 , Orange 40, Gold 20
-            // It just looks pretty
-            colors: vec!["648FFF", "785EF0", "DC267F", "FE6100", "FFB000"]
-                .into_iter()
-                .map(|c| Color::hex(c).unwrap())
-                .collect::<Vec<Color>>()
-                .into_iter()
-                .cycle(),
-        }
-    }
-}
-
-impl LayerColors {
-    pub fn get_color(&mut self) -> Color {
-        self.colors.next().unwrap()
-    }
-}
-
-#[derive(Debug, Default, Deref, DerefMut)]
-pub struct TileIndexIter(Option<itertools::Product<Range<u32>, Range<u32>>>);
-
-#[derive(Debug, Default, Clone, Copy)]
-struct DrawTileEvent((u32, u32));
-
-#[derive(Debug, Default)]
-struct RenderingCompleteEvent;
-
-#[derive(Debug, Component)]
-pub struct MainCamera;
+use types::{
+    DrawTileEvent, FlattenedElems, GeoPolygon, GeoShapeEnum, HiResCam, HiResHandle, LayerColors,
+    Layers, LibLayers, LibraryWrapper, MainCamera, OpenVlsirLibCompleteEvent,
+    RenderingCompleteEvent, TileIndexIter, Tilemap, TilemapLowerLeft, VlsirLib, MAIN_CAMERA_LAYER,
+    MAIN_CAMERA_PRIORITY, TEXTURE_DIM,
+};
 
 fn main() {
     App::new()
@@ -117,12 +57,13 @@ fn main() {
         .add_plugin(PanCamPlugin)
         .add_plugin(TiledRendererPlugin)
         .init_resource::<LayerColors>()
-        .init_resource::<VlsirLib>()
+        .init_resource::<OpenVlsirLibCompleteEvent>()
         .init_resource::<FlattenedElems>()
-        .init_resource::<TileMap>()
-        .init_resource::<TileMapLowerLeft>()
+        .init_resource::<Tilemap>()
+        .init_resource::<TilemapLowerLeft>()
         .init_resource::<Layers>()
         .init_resource::<LibLayers>()
+        .init_resource::<VlsirLib>()
         .init_resource::<TileIndexIter>()
         .add_event::<OpenVlsirLibCompleteEvent>()
         .add_event::<DrawTileEvent>()
@@ -138,24 +79,161 @@ fn main() {
         .run();
 }
 
-fn setup(mut commands: Commands) {
-    let mut camera = Camera2dBundle {
+fn initialize_hi_res_resources(commands: &mut Commands, images: &mut Assets<Image>) {
+    let size = Extent3d {
+        width: TEXTURE_DIM,
+        height: TEXTURE_DIM,
+        ..default()
+    };
+
+    let mut image = Image {
+        texture_descriptor: TextureDescriptor {
+            label: Some("HIRES_TEXTURE"),
+            size,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Bgra8UnormSrgb,
+            mip_level_count: 1,
+            sample_count: 1,
+            usage: TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_DST
+                | TextureUsages::RENDER_ATTACHMENT,
+        },
+        ..default()
+    };
+
+    // This fills the image with zeros
+    image.resize(size);
+
+    let handle = images.add(image);
+
+    let mut hires_cam = Camera2dBundle {
+        camera_2d: Camera2d::default(),
         camera: Camera {
-            // renders after the cameras with lower values for priority
-            priority: 3,
+            target: RenderTarget::Image(handle.clone()),
             ..default()
         },
-        transform: Transform::from_translation((-9284.8, -100.0, 999.0).into()),
+        ..default()
+    };
+
+    hires_cam.projection.window_origin = WindowOrigin::BottomLeft;
+    hires_cam
+        .projection
+        .update(size.width as f32, size.height as f32);
+
+    commands.spawn_bundle(hires_cam).insert(HiResCam);
+    commands.insert_resource(HiResHandle(handle));
+}
+
+fn initialize_accumulation_resources(commands: &mut Commands, images: &mut Assets<Image>) {
+    let size = Extent3d {
+        width: TEXTURE_DIM,
+        height: TEXTURE_DIM,
+        ..default()
+    };
+
+    info!("creating new accumulation texture");
+    info!("accumulation texture size {size:?}");
+
+    // info!("CREATING NEW ACCUMULATION TEXTURE... SLEEPING FOR 5s");
+
+    // std::thread::sleep(Duration::from_secs(5));
+
+    // This is the texture that will be rendered to.
+    let mut image = Image {
+        texture_descriptor: TextureDescriptor {
+            label: Some("ACCUMULATION_TEXTURE"),
+            size,
+            dimension: TextureDimension::D2,
+            format: TextureFormat::Bgra8UnormSrgb,
+            mip_level_count: 1,
+            sample_count: 1,
+            usage: TextureUsages::TEXTURE_BINDING
+                | TextureUsages::COPY_DST
+                | TextureUsages::RENDER_ATTACHMENT,
+        },
+        ..default()
+    };
+
+    // fill image.data with zeroes
+    image.resize(size);
+
+    let handle = images.add(image);
+
+    // sprite with the accumulation texture
+    commands
+        .spawn_bundle(SpriteBundle {
+            sprite: Sprite {
+                custom_size: Some(Vec2::new(size.width as f32, size.height as f32)),
+                anchor: Anchor::BottomLeft,
+                ..default()
+            },
+            texture: handle.clone(),
+            transform: Transform::from_translation((0.0, 0.0, 1.0).into()),
+            ..default()
+        })
+        .insert(MAIN_CAMERA_LAYER);
+
+    // sprite that is 10% larger than the accumulation texture and underneath/futher from the camera
+    // than the accumulation texture sprite to indicate where the texture is/outline it
+    commands
+        .spawn_bundle(SpriteBundle {
+            sprite: Sprite {
+                custom_size: Some(Vec2::new(size.width as f32 * 1.1, size.height as f32 * 1.1)),
+                anchor: Anchor::BottomLeft,
+                color: Color::rgb(1.0, 0.0, 0.0),
+                ..default()
+            },
+            transform: Transform::from_translation(
+                (-0.05 * size.width as f32, -0.05 * size.height as f32, 0.0).into(),
+            ),
+            ..default()
+        })
+        .insert(MAIN_CAMERA_LAYER);
+
+    commands
+        .spawn_bundle(Camera2dBundle {
+            camera: Camera {
+                priority: ACCUMULATION_CAMERA_PRIORITY,
+                target: RenderTarget::Image(handle.clone()),
+                viewport: Some(Viewport {
+                    physical_size: UVec2::new(TILE_SIZE, TILE_SIZE),
+                    ..default()
+                }),
+                ..default()
+            },
+            camera_2d: Camera2d {
+                clear_color: ClearColorConfig::None,
+            },
+            ..default()
+        })
+        .insert(DOWNSCALING_PASS_LAYER)
+        .insert(AccumulationCam);
+
+    commands.insert_resource(AccumulationHandle(handle));
+}
+
+fn setup(mut commands: Commands, mut images: ResMut<Assets<Image>>) {
+    // configure and spawn the main camera
+    let mut camera = Camera2dBundle {
+        camera: Camera {
+            priority: MAIN_CAMERA_PRIORITY,
+            ..default()
+        },
+        transform: Transform::from_translation((-4000.0, -550.0, 999.0).into()),
         ..Camera2dBundle::default()
     };
     camera.projection.window_origin = WindowOrigin::BottomLeft;
-    camera.projection.scale = 13.0;
+    camera.projection.scale = 8.5;
 
     commands
         .spawn_bundle(camera)
         .insert(MAIN_CAMERA_LAYER)
         .insert(MainCamera)
         .insert(PanCam::default());
+
+    initialize_hi_res_resources(&mut commands, &mut images);
+
+    initialize_accumulation_resources(&mut commands, &mut images);
 }
 
 fn camera_changed_system(
@@ -211,10 +289,10 @@ fn load_lib_system(
     mut layers: ResMut<Layers>,
     mut lib_layers: ResMut<LibLayers>,
     render_device: Res<RenderDevice>,
-    mut tilemap: ResMut<TileMap>,
+    mut tilemap: ResMut<Tilemap>,
     mut tile_index_iter: ResMut<TileIndexIter>,
     mut flattened_elems_res: ResMut<FlattenedElems>,
-    mut min_offset_res: ResMut<TileMapLowerLeft>,
+    mut min_offset_res: ResMut<TilemapLowerLeft>,
     mut ev: EventWriter<DrawTileEvent>,
 ) {
     let texture_dim = render_device.limits().max_texture_dimension_2d;
@@ -255,7 +333,7 @@ fn load_lib_system(
         }
 
         assert!(!bbox.is_empty(), "bbox must be valid!");
-        *min_offset_res = TileMapLowerLeft {
+        *min_offset_res = TilemapLowerLeft {
             x: bbox.p0.x as i64,
             y: bbox.p0.y as i64,
         };
@@ -322,7 +400,7 @@ fn load_lib_system(
 
         *flattened_elems_res = FlattenedElems(flattened_elems);
 
-        stats(&tilemap);
+        tilemap_stats_and_debug(&tilemap);
 
         let (x, y) = get_grid_shape(&tilemap);
 
@@ -355,72 +433,10 @@ fn iter_tile_index_system(
     }
 }
 
-fn get_grid_shape(grid: &TileMap) -> (u32, u32) {
-    let (mut x_min, mut x_max, mut y_min, mut y_max) = (0, 0, 0, 0);
-    for &(x, y) in grid.keys() {
-        if x < x_min {
-            x_min = x;
-        } else if x > x_max {
-            x_max = x;
-        }
-
-        if y < y_min {
-            y_min = y;
-        } else if y > y_max {
-            y_max = y;
-        }
-    }
-
-    (x_max - x_min + 1, y_max - y_min + 1)
-}
-
-fn stats(grid: &TileMap) {
-    let mut counts: Vec<usize> = vec![];
-
-    for v in grid.values() {
-        counts.push(v.shapes.len());
-    }
-
-    let num_occupied_bins = counts.iter().filter(|x| **x != 0).collect::<Vec<_>>().len();
-    let min = counts.iter().min().unwrap();
-    let max = counts.iter().max().unwrap();
-    let num_rects_incl_duplicates = counts.iter().sum::<usize>();
-    // average shapes per occupied bin
-    let avg_spob = counts.iter().sum::<usize>() / counts.len();
-
-    let grid_size = get_grid_shape(&grid);
-
-    let mut wtr = Writer::from_path("table_heatmap_data.csv").unwrap();
-
-    for iy in 0..grid_size.1 {
-        let mut row = vec![];
-        for ix in 0..grid_size.0 {
-            let count = grid.get(&(ix, iy)).unwrap().shapes.len();
-            row.push(count.to_string());
-        }
-
-        wtr.write_record(&row[..]).unwrap();
-    }
-
-    wtr.flush().unwrap();
-
-    let num_bins = (grid_size.0 * grid_size.1) as usize;
-    let grid_occupancy = num_occupied_bins as f32 / num_bins as f32;
-    info!(
-        "grid_size: {grid_size:?}, num_bins: {num_bins}, num_occupied_bins: {num_occupied_bins}, num_rects_incl_duplicates: {num_rects_incl_duplicates}"
-    );
-    info!("grid_occupancy: {grid_occupancy}");
-    info!(
-        "avg shapes per occupied bin: {}",
-        num_rects_incl_duplicates as f32 / num_occupied_bins as f32
-    );
-    info!("min: {min}, max: {max}, avg_spob: {avg_spob}");
-}
-
 pub fn import_cell_shapes(
     tilemap_shift: raw::Point,
     texture_dim: u32,
-    tilemap: &mut TileMap,
+    tilemap: &mut Tilemap,
     elems: &Vec<raw::Element>,
     shape_count: &mut u64,
 ) {
@@ -461,256 +477,7 @@ pub fn import_cell_shapes(
 
                     GeoShapeEnum::Polygon(poly)
                 }
-                raw::Shape::Path(p) => {
-                    let num_points = p.points.len();
-                    let mut forward_poly_points = Vec::with_capacity(num_points);
-                    let mut backward_poly_points = Vec::with_capacity(num_points);
-                    assert_eq!(
-                        p.width % 2,
-                        0,
-                        "width must be even for our code's assumptions to hold!"
-                    );
-                    let half_width = (p.width / 2) as isize; // assuming that widths are even!
-
-                    #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-                    enum RectMove {
-                        Left,
-                        Right,
-                        Up,
-                        Down,
-                    };
-
-                    fn calculate_move(p0: raw::Point, p1: raw::Point) -> RectMove {
-                        if p0.x == p1.x {
-                            if p0.y == p1.y {
-                                panic!("Cannot handle distinct points in a path with the same coordinate: p0 {p0:?} and p1 {p1:?}");
-                            } else if p0.y < p1.y {
-                                RectMove::Up
-                            } else {
-                                RectMove::Down
-                            }
-                        } else if p0.y == p1.y {
-                            if p0.x == p1.x {
-                                panic!("Cannot handle distinct points in a path with the same coordinate: p0 {p0:?} and p1 {p1:?}");
-                            } else if p0.x < p1.x {
-                                RectMove::Right
-                            } else {
-                                RectMove::Left
-                            }
-                        } else {
-                            panic!(
-                                "rectilinear moves expected, but found: p0 {p0:?} and p1 {p1:?}"
-                            );
-                        }
-                    }
-
-                    fn shift_pure_right(
-                        forward_poly_points: &mut Vec<raw::Point>,
-                        backward_poly_points: &mut Vec<raw::Point>,
-                        p0: raw::Point,
-                        half_width: isize,
-                    ) {
-                        forward_poly_points.push(raw::Point {
-                            x: p0.x,
-                            y: p0.y - half_width,
-                        });
-                        backward_poly_points.push(raw::Point {
-                            x: p0.x,
-                            y: p0.y + half_width,
-                        });
-                    }
-
-                    fn shift_pure_left(
-                        forward_poly_points: &mut Vec<raw::Point>,
-                        backward_poly_points: &mut Vec<raw::Point>,
-                        p0: raw::Point,
-                        half_width: isize,
-                    ) {
-                        forward_poly_points.push(raw::Point {
-                            x: p0.x,
-                            y: p0.y + half_width,
-                        });
-                        backward_poly_points.push(raw::Point {
-                            x: p0.x,
-                            y: p0.y - half_width,
-                        });
-                    }
-
-                    fn shift_pure_up(
-                        forward_poly_points: &mut Vec<raw::Point>,
-                        backward_poly_points: &mut Vec<raw::Point>,
-                        p0: raw::Point,
-                        half_width: isize,
-                    ) {
-                        forward_poly_points.push(raw::Point {
-                            x: p0.x + half_width,
-                            y: p0.y,
-                        });
-                        backward_poly_points.push(raw::Point {
-                            x: p0.x - half_width,
-                            y: p0.y,
-                        });
-                    }
-
-                    fn shift_pure_down(
-                        forward_poly_points: &mut Vec<raw::Point>,
-                        backward_poly_points: &mut Vec<raw::Point>,
-                        p0: raw::Point,
-                        half_width: isize,
-                    ) {
-                        forward_poly_points.push(raw::Point {
-                            x: p0.x - half_width,
-                            y: p0.y,
-                        });
-                        backward_poly_points.push(raw::Point {
-                            x: p0.x + half_width,
-                            y: p0.y,
-                        });
-                    }
-
-                    fn shift_right_up(
-                        forward_poly_points: &mut Vec<raw::Point>,
-                        backward_poly_points: &mut Vec<raw::Point>,
-                        p0: raw::Point,
-                        half_width: isize,
-                    ) {
-                        forward_poly_points.push(raw::Point {
-                            x: p0.x + half_width,
-                            y: p0.y - half_width,
-                        });
-                        backward_poly_points.push(raw::Point {
-                            x: p0.x - half_width,
-                            y: p0.y + half_width,
-                        });
-                    }
-
-                    fn shift_left_down(
-                        forward_poly_points: &mut Vec<raw::Point>,
-                        backward_poly_points: &mut Vec<raw::Point>,
-                        p0: raw::Point,
-                        half_width: isize,
-                    ) {
-                        shift_right_up(backward_poly_points, forward_poly_points, p0, half_width);
-                    }
-
-                    fn shift_right_down(
-                        forward_poly_points: &mut Vec<raw::Point>,
-                        backward_poly_points: &mut Vec<raw::Point>,
-                        p0: raw::Point,
-                        half_width: isize,
-                    ) {
-                        forward_poly_points.push(raw::Point {
-                            x: p0.x - half_width,
-                            y: p0.y - half_width,
-                        });
-                        backward_poly_points.push(raw::Point {
-                            x: p0.x + half_width,
-                            y: p0.y + half_width,
-                        });
-                    }
-
-                    fn shift_left_up(
-                        forward_poly_points: &mut Vec<raw::Point>,
-                        backward_poly_points: &mut Vec<raw::Point>,
-                        p0: raw::Point,
-                        half_width: isize,
-                    ) {
-                        shift_right_down(backward_poly_points, forward_poly_points, p0, half_width);
-                    }
-
-                    assert!(
-                        num_points > 1,
-                        "Expected number of points in path to be > 1"
-                    );
-                    let start_move = calculate_move(p.points[0], p.points[1]);
-
-                    match start_move {
-                        RectMove::Right => shift_pure_right(
-                            &mut forward_poly_points,
-                            &mut backward_poly_points,
-                            p.points[0],
-                            half_width,
-                        ),
-                        RectMove::Left => shift_pure_left(
-                            &mut forward_poly_points,
-                            &mut backward_poly_points,
-                            p.points[0],
-                            half_width,
-                        ),
-                        RectMove::Up => shift_pure_up(
-                            &mut forward_poly_points,
-                            &mut backward_poly_points,
-                            p.points[0],
-                            half_width,
-                        ),
-                        RectMove::Down => shift_pure_down(
-                            &mut forward_poly_points,
-                            &mut backward_poly_points,
-                            p.points[0],
-                            half_width,
-                        ),
-                    }
-
-                    let mut last_move = start_move;
-
-                    for ix in 1..(num_points - 1) {
-                        let p0 = p.points[ix];
-                        let p1 = p.points[ix + 1];
-                        let next_move = calculate_move(p0, p1);
-                        match (last_move, next_move) {
-                            (RectMove::Right, RectMove::Right) => shift_pure_right(&mut forward_poly_points, &mut backward_poly_points, p.points[0], half_width),
-                            (RectMove::Left, RectMove::Left) => shift_pure_left(&mut forward_poly_points, &mut backward_poly_points, p.points[0], half_width),
-                            (RectMove::Up, RectMove::Up) => shift_pure_up(&mut forward_poly_points, &mut backward_poly_points, p.points[0], half_width),
-                            (RectMove::Down, RectMove::Down) => shift_pure_down(&mut forward_poly_points, &mut backward_poly_points, p.points[0], half_width),
-                            (RectMove::Right, RectMove::Down) | (RectMove::Down, RectMove::Right) => shift_right_down(&mut forward_poly_points, &mut backward_poly_points, p.points[0], half_width),
-                            (RectMove::Right, RectMove::Up) | (RectMove::Up, RectMove::Right) => shift_right_up(&mut forward_poly_points, &mut backward_poly_points, p.points[0], half_width),
-                            (RectMove::Left, RectMove::Up) | (RectMove::Up, RectMove::Left) => shift_left_up(&mut forward_poly_points, &mut backward_poly_points, p.points[0], half_width),
-                            (RectMove::Left, RectMove::Down) | (RectMove::Down, RectMove::Left) => shift_left_down(&mut forward_poly_points, &mut backward_poly_points, p.points[0], half_width),
-                            (_, _) => panic!("Received opposing last/next moves! last: {last_move:?}, next: {next_move:?}"),
-                        }
-                        last_move = next_move;
-                    }
-
-                    let end_move =
-                        calculate_move(p.points[num_points - 2], p.points[num_points - 1]);
-                    match end_move {
-                        RectMove::Right => shift_pure_right(
-                            &mut forward_poly_points,
-                            &mut backward_poly_points,
-                            p.points[num_points - 1],
-                            half_width,
-                        ),
-                        RectMove::Left => shift_pure_left(
-                            &mut forward_poly_points,
-                            &mut backward_poly_points,
-                            p.points[num_points - 1],
-                            half_width,
-                        ),
-                        RectMove::Up => shift_pure_up(
-                            &mut forward_poly_points,
-                            &mut backward_poly_points,
-                            p.points[num_points - 1],
-                            half_width,
-                        ),
-                        RectMove::Down => shift_pure_down(
-                            &mut forward_poly_points,
-                            &mut backward_poly_points,
-                            p.points[num_points - 1],
-                            half_width,
-                        ),
-                    }
-
-                    let poly = GeoPolygon::new(
-                        forward_poly_points
-                            .into_iter()
-                            .chain(backward_poly_points.into_iter().rev())
-                            .map(|p| (p.x as i64, p.y as i64))
-                            .collect(),
-                        vec![],
-                    );
-
-                    GeoShapeEnum::Polygon(poly)
-                }
+                raw::Shape::Path(p) => GeoShapeEnum::Polygon(make_path_into_polygon(p)),
             };
 
             for x in min_tile_x..(max_tile_x + 1) {
@@ -739,89 +506,6 @@ pub fn import_cell_shapes(
 
         if *shape_count % 1_000_000 == 0 {
             info!("shapes processed: {shape_count}");
-        }
-    }
-}
-
-#[derive(Default)]
-pub struct PanCamPlugin;
-
-impl Plugin for PanCamPlugin {
-    fn build(&self, app: &mut App) {
-        app.add_system(camera_movement).add_system(camera_zoom);
-    }
-}
-
-// Zoom doesn't work on bevy 0.5 due to: https://github.com/bevyengine/bevy/pull/2015
-fn camera_zoom(
-    mut query: Query<(&PanCam, &mut OrthographicProjection)>,
-    mut scroll_events: EventReader<MouseWheel>,
-) {
-    let pixels_per_line = 100.; // Maybe make configurable?
-    let scroll = scroll_events
-        .iter()
-        .map(|ev| match ev.unit {
-            MouseScrollUnit::Pixel => ev.y,
-            MouseScrollUnit::Line => ev.y * pixels_per_line,
-        })
-        .sum::<f32>();
-
-    if scroll == 0. {
-        return;
-    }
-
-    for (cam, mut projection) in query.iter_mut() {
-        if cam.enabled {
-            projection.scale = (projection.scale * (1. + -scroll * 0.001)).max(0.00001);
-        }
-    }
-}
-
-fn camera_movement(
-    mut windows: ResMut<Windows>,
-    mouse_buttons: Res<Input<MouseButton>>,
-    mut query: Query<(&PanCam, &mut Transform, &OrthographicProjection)>,
-    mut last_pos: Local<Option<Vec2>>,
-) {
-    let window = windows.get_primary_mut().unwrap();
-
-    // Use position instead of MouseMotion, otherwise we don't get acceleration
-    // movement
-    let current_pos = match window.cursor_position() {
-        Some(current_pos) => current_pos,
-        None => return,
-    };
-    let delta = current_pos - last_pos.unwrap_or(current_pos);
-
-    for (cam, mut transform, projection) in query.iter_mut() {
-        if cam.enabled
-            && cam
-                .grab_buttons
-                .iter()
-                .any(|btn| mouse_buttons.pressed(*btn))
-        {
-            let scaling = Vec2::new(
-                window.width() / (projection.right - projection.left),
-                window.height() / (projection.top - projection.bottom),
-            ) * projection.scale;
-
-            transform.translation -= (delta * scaling).extend(0.);
-        }
-    }
-    *last_pos = Some(current_pos);
-}
-
-#[derive(Component)]
-pub struct PanCam {
-    pub grab_buttons: Vec<MouseButton>,
-    pub enabled: bool,
-}
-
-impl Default for PanCam {
-    fn default() -> Self {
-        Self {
-            grab_buttons: vec![MouseButton::Left, MouseButton::Right, MouseButton::Middle],
-            enabled: true,
         }
     }
 }
