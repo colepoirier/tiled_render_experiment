@@ -18,7 +18,7 @@ use crate::{
     types::{
         DrawTileEvent, FlattenedElems, Layers, LibLayers, LyonShape, LyonShapeBundle,
         RenderingCompleteEvent, RenderingDoneChannel, Tilemap, TilemapLowerLeft, ALPHA,
-        DOWNSCALING_PASS_LAYER, WIDTH,
+        DOWNSCALING_PASS_LAYER, TILE_SIZE_IN_PX, WIDTH,
     },
 };
 use crate::{
@@ -26,8 +26,6 @@ use crate::{
     HiResHandle,
 };
 use layout21::raw;
-
-pub const TILE_SIZE: u32 = 64;
 
 pub struct TiledRendererPlugin;
 
@@ -273,10 +271,10 @@ fn spawn_cameras_system(
     mut accumulation_cam_q: Query<&mut Camera, (With<AccumulationCam>, Without<HiResCam>)>,
 ) {
     for DrawTileEvent(key) in draw_ev.iter() {
-        if key.0 % 15 == 0 {
-            rendering_complete_ev.send_default();
-            continue;
-        }
+        // if key.0 % 15 == 0 {
+        //     rendering_complete_ev.send_default();
+        //     continue;
+        // }
 
         let tile = tilemap.get(key).unwrap();
 
@@ -336,8 +334,10 @@ fn spawn_cameras_system(
             })
             .insert(DOWNSCALING_PASS_LAYER);
 
-        let physical_position =
-            UVec2::new((x / TILE_SIZE as i64) as u32, (y / TILE_SIZE as i64) as u32);
+        let physical_position = UVec2::new(
+            (x / TILE_SIZE_IN_PX as i64) as u32,
+            (y / TILE_SIZE_IN_PX as i64) as u32,
+        );
 
         info!("viewport: {physical_position:?}");
 
@@ -345,7 +345,7 @@ fn spawn_cameras_system(
             cam.is_active = true;
             cam.viewport = Some(Viewport {
                 physical_position,
-                physical_size: UVec2::new(TILE_SIZE, TILE_SIZE),
+                physical_size: UVec2::new(TILE_SIZE_IN_PX, TILE_SIZE_IN_PX),
                 ..default()
             });
         }

@@ -24,10 +24,9 @@ pub mod tiled_renderer;
 use tiled_renderer::TiledRendererPlugin;
 
 use crate::{
-    tiled_renderer::TILE_SIZE,
     types::{
         AccumulationCam, AccumulationHandle, GeoRect, Tile, ACCUMULATION_CAMERA_PRIORITY,
-        DOWNSCALING_PASS_LAYER,
+        DOWNSCALING_PASS_LAYER, NUM_TILES, TILE_SIZE_IN_PX,
     },
     utils::{get_grid_shape, tilemap_stats_and_debug},
 };
@@ -196,7 +195,7 @@ fn initialize_accumulation_resources(commands: &mut Commands, images: &mut Asset
                 priority: ACCUMULATION_CAMERA_PRIORITY,
                 target: RenderTarget::Image(handle.clone()),
                 viewport: Some(Viewport {
-                    physical_size: UVec2::new(TILE_SIZE, TILE_SIZE),
+                    physical_size: UVec2::new(TILE_SIZE_IN_PX, TILE_SIZE_IN_PX),
                     ..default()
                 }),
                 ..default()
@@ -288,15 +287,12 @@ fn load_lib_system(
     mut layer_colors: ResMut<LayerColors>,
     mut layers: ResMut<Layers>,
     mut lib_layers: ResMut<LibLayers>,
-    render_device: Res<RenderDevice>,
     mut tilemap: ResMut<Tilemap>,
     mut tile_index_iter: ResMut<TileIndexIter>,
     mut flattened_elems_res: ResMut<FlattenedElems>,
     mut min_offset_res: ResMut<TilemapLowerLeft>,
     mut ev: EventWriter<DrawTileEvent>,
 ) {
-    let texture_dim = render_device.limits().max_texture_dimension_2d;
-
     for _ in vlsir_open_lib_complete_event_reader.iter() {
         let lib = vlsir_lib.lib.as_ref().unwrap();
 
@@ -340,32 +336,30 @@ fn load_lib_system(
 
         info!("flattened bbox is {bbox:?}");
 
-        let dx = (bbox.p1.x - bbox.p0.x) as u32;
-        let dy = (bbox.p1.y - bbox.p0.y) as u32;
+        let dx = (bbox.p1.x - bbox.p0.x) as u64;
+        let dy = (bbox.p1.y - bbox.p0.y) as u64;
 
-        let num_x_tiles = (dx as f32 / texture_dim as f32).ceil() as u32;
-        let num_y_tiles = (dy as f32 / texture_dim as f32).ceil() as u32;
+        let max_side_length = dx.max(dy);
+        // TODO: do this without converting to f64
+        let tile_size_in_world_space = (max_side_length as f64 / NUM_TILES as f64).ceil() as u64;
 
         let mut x = bbox.p0.x as i64;
         let mut y = bbox.p0.y as i64;
 
-        let mut tilemap_shift = raw::Point::default();
+        // TODO: implement scalar multiplication for our Point (in types)
+        // TODO: Implement a From<raw::Point> impl for our Point
+        let tilemap_shift = raw::Point {
+            x: -x as isize,
+            y: -y as isize,
+        };
 
-        if x < 0 {
-            tilemap_shift.x = -x as isize;
-        }
-
-        if y < 0 {
-            tilemap_shift.y = -y as isize;
-        }
-
-        for iy in 0..num_y_tiles {
+        for iy in 0..NUM_TILES {
             let ymin = y;
-            y += texture_dim as i64;
+            y += tile_size_in_world_space as i64;
             let ymax = y;
-            for ix in 0..num_x_tiles {
+            for ix in 0..NUM_TILES {
                 let xmin = x;
-                x += texture_dim as i64;
+                x += tile_size_in_world_space as i64;
                 let xmax = x;
 
                 let extents = GeoRect::new((xmin, ymin), (xmax, ymax));
@@ -384,13 +378,13 @@ fn load_lib_system(
 
         let mut shape_count = 0;
 
-        info!("{bbox:?}, dx: {dx}, dy: {dy}, tiles: [{num_x_tiles}, {num_y_tiles}]");
+        info!("{bbox:?}, dx: {dx}, dy: {dy}, tile_extent_in_worldspace: {}, num_tiles filled by short side of design: {}");
 
         let t = std::time::Instant::now();
 
         import_cell_shapes(
             tilemap_shift,
-            texture_dim,
+            max_side_length,
             &mut tilemap,
             &flattened_elems,
             &mut shape_count,
@@ -435,7 +429,7 @@ fn iter_tile_index_system(
 
 pub fn import_cell_shapes(
     tilemap_shift: raw::Point,
-    texture_dim: u32,
+    max_side_length: u32,
     tilemap: &mut Tilemap,
     elems: &Vec<raw::Element>,
     shape_count: &mut u64,
@@ -480,8 +474,8 @@ pub fn import_cell_shapes(
                 raw::Shape::Path(p) => GeoShapeEnum::Polygon(make_path_into_polygon(p)),
             };
 
-            for x in min_tile_x..(max_tile_x + 1) {
-                for y in min_tile_y..(max_tile_y + 1) {
+            for x in min_tile_x..=max_tile_x {
+                for y in min_tile_y..=max_tile_y {
                     let Tile { extents, shapes } = tilemap.get_mut(&(x, y)).unwrap();
 
                     let extents = &*extents;

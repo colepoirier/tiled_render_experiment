@@ -23,7 +23,9 @@ pub const MAIN_CAMERA_LAYER: RenderLayers = RenderLayers::layer(2);
 pub const ALPHA: f32 = 0.1;
 pub const WIDTH: f32 = 10.0;
 
-pub const TEXTURE_DIM: u32 = 4096;
+pub const NUM_TILES: u32 = 64;
+pub const TILE_SIZE_IN_PX: u32 = 64;
+pub const TEXTURE_DIM: u32 = NUM_TILES * TILE_SIZE_IN_PX;
 
 #[derive(Debug, Eq, PartialEq, Default, Clone, Copy)]
 pub struct Point {
