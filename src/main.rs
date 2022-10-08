@@ -6,7 +6,6 @@ use bevy::{
         render_resource::{
             Extent3d, TextureDescriptor, TextureDimension, TextureFormat, TextureUsages,
         },
-        renderer::RenderDevice,
     },
     sprite::Anchor,
     tasks::{AsyncComputeTaskPool, Task},
@@ -80,8 +79,8 @@ fn main() {
 
 fn initialize_hi_res_resources(commands: &mut Commands, images: &mut Assets<Image>) {
     let size = Extent3d {
-        width: TEXTURE_DIM,
-        height: TEXTURE_DIM,
+        width: TEXTURE_DIM as u32,
+        height: TEXTURE_DIM as u32,
         ..default()
     };
 
@@ -125,8 +124,8 @@ fn initialize_hi_res_resources(commands: &mut Commands, images: &mut Assets<Imag
 
 fn initialize_accumulation_resources(commands: &mut Commands, images: &mut Assets<Image>) {
     let size = Extent3d {
-        width: TEXTURE_DIM,
-        height: TEXTURE_DIM,
+        width: TEXTURE_DIM as u32,
+        height: TEXTURE_DIM as u32,
         ..default()
     };
 
@@ -378,13 +377,15 @@ fn load_lib_system(
 
         let mut shape_count = 0;
 
-        info!("{bbox:?}, dx: {dx}, dy: {dy}, tile_extent_in_worldspace: {}, num_tiles filled by short side of design: {}");
+        let min_side_length = dx.min(dy);
+        let num_tiles_short_side = (min_side_length as f64 / NUM_TILES as f64).ceil() as u64;
+        info!("{bbox:?}, dx: {dx}, dy: {dy}, tile_size_in_world_space: {tile_size_in_world_space}, num_tiles filled by short side of design: {num_tiles_short_side}");
 
         let t = std::time::Instant::now();
 
         import_cell_shapes(
             tilemap_shift,
-            max_side_length,
+            tile_size_in_world_space,
             &mut tilemap,
             &flattened_elems,
             &mut shape_count,
@@ -429,7 +430,7 @@ fn iter_tile_index_system(
 
 pub fn import_cell_shapes(
     tilemap_shift: raw::Point,
-    max_side_length: u32,
+    tile_size_in_world_space: u64,
     tilemap: &mut Tilemap,
     elems: &Vec<raw::Element>,
     shape_count: &mut u64,
@@ -443,10 +444,10 @@ pub fn import_cell_shapes(
 
             let BoundBox { p0, p1 } = bbox;
 
-            let min_tile_x = p0.x as u32 / texture_dim;
-            let min_tile_y = p0.y as u32 / texture_dim;
-            let max_tile_x = p1.x as u32 / texture_dim;
-            let max_tile_y = p1.y as u32 / texture_dim;
+            let min_tile_x = (p0.x as u64 / tile_size_in_world_space) as u32;
+            let min_tile_y = (p0.y as u64 / tile_size_in_world_space) as u32;
+            let max_tile_x = (p1.x as u64 / tile_size_in_world_space) as u32;
+            let max_tile_y = (p1.y as u64 / tile_size_in_world_space) as u32;
 
             let geo_shape = match inner {
                 raw::Shape::Rect(r) => {

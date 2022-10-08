@@ -1,7 +1,7 @@
 use bevy::prelude::*;
 use csv::Writer;
 
-use crate::types::{Point, Rect, Tilemap};
+use crate::types::Tilemap;
 
 // use bevy::ecs::{
 //     archetype::Archetypes,

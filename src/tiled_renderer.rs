@@ -266,7 +266,7 @@ fn spawn_cameras_system(
     lower_left_res: Res<TilemapLowerLeft>,
     mut draw_ev: EventReader<DrawTileEvent>,
     rendering_done_channel: Res<RenderingDoneChannel>,
-    mut rendering_complete_ev: EventWriter<RenderingCompleteEvent>,
+    // mut rendering_complete_ev: EventWriter<RenderingCompleteEvent>,
     mut hires_cam_q: Query<(&mut Camera, &mut Transform), With<HiResCam>>,
     mut accumulation_cam_q: Query<&mut Camera, (With<AccumulationCam>, Without<HiResCam>)>,
 ) {
