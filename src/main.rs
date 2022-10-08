@@ -39,8 +39,8 @@ use path_to_poly::make_path_into_polygon;
 use types::{
     DrawTileEvent, FlattenedElems, GeoPolygon, GeoShapeEnum, HiResCam, HiResHandle, LayerColors,
     Layers, LibLayers, LibraryWrapper, MainCamera, OpenVlsirLibCompleteEvent,
-    RenderingCompleteEvent, TileIndexIter, Tilemap, TilemapLowerLeft, VlsirLib, MAIN_CAMERA_LAYER,
-    MAIN_CAMERA_PRIORITY, TEXTURE_DIM,
+    RenderingCompleteEvent, TileIndexIter, TileSizeInWorldSpace, Tilemap, TilemapLowerLeft,
+    VlsirLib, MAIN_CAMERA_LAYER, MAIN_CAMERA_PRIORITY, TEXTURE_DIM,
 };
 
 fn main() {
@@ -63,6 +63,7 @@ fn main() {
         .init_resource::<LibLayers>()
         .init_resource::<VlsirLib>()
         .init_resource::<TileIndexIter>()
+        .init_resource::<TileSizeInWorldSpace>()
         .add_event::<OpenVlsirLibCompleteEvent>()
         .add_event::<DrawTileEvent>()
         .add_event::<TileIndexIter>()
@@ -290,6 +291,7 @@ fn load_lib_system(
     mut tile_index_iter: ResMut<TileIndexIter>,
     mut flattened_elems_res: ResMut<FlattenedElems>,
     mut min_offset_res: ResMut<TilemapLowerLeft>,
+    mut tile_size_in_world_space_res: ResMut<TileSizeInWorldSpace>,
     mut ev: EventWriter<DrawTileEvent>,
 ) {
     for _ in vlsir_open_lib_complete_event_reader.iter() {
@@ -335,12 +337,18 @@ fn load_lib_system(
 
         info!("flattened bbox is {bbox:?}");
 
-        let dx = (bbox.p1.x - bbox.p0.x) as u64;
-        let dy = (bbox.p1.y - bbox.p0.y) as u64;
+        let dx = (bbox.p1.x - bbox.p0.x) as u32;
+        let dy = (bbox.p1.y - bbox.p0.y) as u32;
 
         let max_side_length = dx.max(dy);
         // TODO: do this without converting to f64
-        let tile_size_in_world_space = (max_side_length as f64 / NUM_TILES as f64).ceil() as u64;
+        let tile_size_in_world_space = (max_side_length as f64 / NUM_TILES as f64).ceil() as u32;
+        *tile_size_in_world_space_res = TileSizeInWorldSpace(tile_size_in_world_space);
+
+        let min_side_length = dx.min(dy);
+        let num_tiles_filled_by_short_side =
+            (min_side_length as f64 / NUM_TILES as f64).ceil() as u32;
+        info!("{bbox:?}, dx: {dx}, dy: {dy}, tile_size_in_world_space: {tile_size_in_world_space}, num_tiles filled by short side of design: {num_tiles_filled_by_short_side}");
 
         let mut x = bbox.p0.x as i64;
         let mut y = bbox.p0.y as i64;
@@ -376,10 +384,6 @@ fn load_lib_system(
         }
 
         let mut shape_count = 0;
-
-        let min_side_length = dx.min(dy);
-        let num_tiles_short_side = (min_side_length as f64 / NUM_TILES as f64).ceil() as u64;
-        info!("{bbox:?}, dx: {dx}, dy: {dy}, tile_size_in_world_space: {tile_size_in_world_space}, num_tiles filled by short side of design: {num_tiles_short_side}");
 
         let t = std::time::Instant::now();
 
@@ -430,7 +434,7 @@ fn iter_tile_index_system(
 
 pub fn import_cell_shapes(
     tilemap_shift: raw::Point,
-    tile_size_in_world_space: u64,
+    tile_size_in_world_space: u32,
     tilemap: &mut Tilemap,
     elems: &Vec<raw::Element>,
     shape_count: &mut u64,
@@ -444,10 +448,10 @@ pub fn import_cell_shapes(
 
             let BoundBox { p0, p1 } = bbox;
 
-            let min_tile_x = (p0.x as u64 / tile_size_in_world_space) as u32;
-            let min_tile_y = (p0.y as u64 / tile_size_in_world_space) as u32;
-            let max_tile_x = (p1.x as u64 / tile_size_in_world_space) as u32;
-            let max_tile_y = (p1.y as u64 / tile_size_in_world_space) as u32;
+            let min_tile_x = p0.x as u32 / tile_size_in_world_space;
+            let min_tile_y = p0.y as u32 / tile_size_in_world_space;
+            let max_tile_x = p1.x as u32 / tile_size_in_world_space;
+            let max_tile_y = p1.y as u32 / tile_size_in_world_space;
 
             let geo_shape = match inner {
                 raw::Shape::Rect(r) => {

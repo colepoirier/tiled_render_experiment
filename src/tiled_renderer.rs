@@ -17,8 +17,8 @@ use crate::{
     path_to_poly::make_path_into_polygon,
     types::{
         DrawTileEvent, FlattenedElems, Layers, LibLayers, LyonShape, LyonShapeBundle,
-        RenderingCompleteEvent, RenderingDoneChannel, Tilemap, TilemapLowerLeft, ALPHA,
-        DOWNSCALING_PASS_LAYER, TILE_SIZE_IN_PX, WIDTH,
+        RenderingCompleteEvent, RenderingDoneChannel, TileSizeInWorldSpace, Tilemap,
+        TilemapLowerLeft, ALPHA, DOWNSCALING_PASS_LAYER, TILE_SIZE_IN_PX, WIDTH,
     },
 };
 use crate::{
@@ -269,6 +269,7 @@ fn spawn_cameras_system(
     // mut rendering_complete_ev: EventWriter<RenderingCompleteEvent>,
     mut hires_cam_q: Query<(&mut Camera, &mut Transform), With<HiResCam>>,
     mut accumulation_cam_q: Query<&mut Camera, (With<AccumulationCam>, Without<HiResCam>)>,
+    tile_size_in_world_space: Res<TileSizeInWorldSpace>,
 ) {
     for DrawTileEvent(key) in draw_ev.iter() {
         // if key.0 % 15 == 0 {
@@ -283,8 +284,10 @@ fn spawn_cameras_system(
 
         assert!(tile_x >= 0, "tile_x should be positive");
         assert!(tile_y >= 0, "tile_y should be positive");
-        let x = tile_x;
-        let y = tile_y;
+        let x = tile_x as u32 / **tile_size_in_world_space;
+        let y = tile_y as u32 / **tile_size_in_world_space;
+
+        info!("tile x: {x}, y: {y}");
 
         let transform = Transform::from_translation(Vec3::new(x as f32, y as f32, 999.0));
 
@@ -334,10 +337,7 @@ fn spawn_cameras_system(
             })
             .insert(DOWNSCALING_PASS_LAYER);
 
-        let physical_position = UVec2::new(
-            (x / TILE_SIZE_IN_PX as i64) as u32,
-            (y / TILE_SIZE_IN_PX as i64) as u32,
-        );
+        let physical_position = UVec2::new(x * TILE_SIZE_IN_PX, y * TILE_SIZE_IN_PX);
 
         info!("viewport: {physical_position:?}");
 

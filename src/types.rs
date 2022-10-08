@@ -83,6 +83,9 @@ pub struct TilemapLowerLeft {
     pub y: i64,
 }
 
+#[derive(Debug, Default, Deref)]
+pub struct TileSizeInWorldSpace(pub u32);
+
 #[derive(Debug, Default, Deref, DerefMut)]
 pub struct TileIndexIter(pub Option<itertools::Product<Range<u32>, Range<u32>>>);
 
