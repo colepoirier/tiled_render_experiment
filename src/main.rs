@@ -1,3 +1,4 @@
+use bevy::utils::HashSet;
 use bevy::{
     core_pipeline::clear_color::ClearColorConfig,
     prelude::*,
@@ -36,6 +37,7 @@ mod utils;
 
 use path_to_poly::make_path_into_polygon;
 
+use crate::utils::side_len_stats_and_debug;
 use types::{
     DrawTileEvent, FlattenedElems, GeoPolygon, GeoShapeEnum, HiResCam, HiResHandle, LayerColors,
     Layers, LibLayers, LibraryWrapper, MainCamera, OpenVlsirLibCompleteEvent,
@@ -322,9 +324,19 @@ fn load_lib_system(
 
         info!("num elems including instances: {}", flattened_elems.len());
 
+        let mut max_side_lens = HashSet::new();
+        let mut areas = HashSet::new();
+
         let mut bbox = BoundBox::empty();
         for elem in flattened_elems.iter() {
-            bbox = elem.inner.union(&bbox);
+            let elem_bbox = elem.inner.bbox();
+
+            let len_x = (elem_bbox.p1.x - elem_bbox.p0.x) as u64;
+            let len_y = (elem_bbox.p1.y - elem_bbox.p0.y) as u64;
+            areas.insert(len_x * len_y);
+            max_side_lens.insert(len_x.max(len_y));
+
+            bbox = elem_bbox.union(&bbox);
         }
 
         assert!(!bbox.is_empty(), "bbox must be valid!");
@@ -395,6 +407,7 @@ fn load_lib_system(
 
         *flattened_elems_res = FlattenedElems(flattened_elems);
 
+        side_len_stats_and_debug(&max_side_lens, &areas);
         tilemap_stats_and_debug(&tilemap);
 
         let (x, y) = get_grid_shape(&tilemap);

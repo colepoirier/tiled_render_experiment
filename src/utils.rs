@@ -1,4 +1,5 @@
 use bevy::prelude::*;
+use bevy::utils::HashSet;
 use csv::Writer;
 
 use crate::types::Tilemap;
@@ -97,4 +98,35 @@ pub fn tilemap_stats_and_debug(grid: &Tilemap) {
         num_rects_incl_duplicates as f32 / num_occupied_bins as f32
     );
     info!("min: {min}, max: {max}, avg_spob: {avg_spob}");
+}
+
+pub fn integer_stats(label: &str, set_of_ints: &HashSet<u64>, num_bins: usize) {
+    let max_int = set_of_ints.iter().max().copied().unwrap_or(0);
+    let max_int_f64 = max_int as f64;
+    let bin_size = 1.0 / (num_bins as f64);
+    let bin_mins: Vec<f64> = (0..num_bins).map(|x| x as f64 * bin_size).collect();
+    let mut bin_counts = vec![0_usize; num_bins];
+    if max_int > 0 {
+        for this_int in set_of_ints {
+            let relative_size = *this_int as f64 / max_int_f64;
+            let mut bin = 0;
+            'bin_find: for (bin_ix, bin_min) in bin_mins.iter().copied().enumerate().rev() {
+                if relative_size > bin_min {
+                    bin = bin_ix;
+                    break 'bin_find;
+                }
+            }
+            bin_counts[bin] += 1;
+        }
+    }
+    info!("==== {label} stats ====");
+    info!("max {label}: {max_int}");
+    for (bin_min, bin_count) in bin_mins.iter().zip(bin_counts) {
+        info!("count within {bin_min:.2} of max: {bin_count}");
+    }
+}
+
+pub fn side_len_stats_and_debug(max_side_lens: &HashSet<u64>, areas: &HashSet<u64>) {
+    integer_stats("max_side_len", max_side_lens, 10);
+    integer_stats("area", areas, 10);
 }
